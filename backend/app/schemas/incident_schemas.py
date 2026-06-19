@@ -17,6 +17,7 @@ class IncidentCreate(BaseModel):
     description: str
     priority: PriorityLevel
     category: Optional[str] = None
+    source_service: Optional[str] = None
     log_ids: Optional[list[UUID]] = None
     log_count: int = 0
     ai_analysis: Optional[str] = None
@@ -33,19 +34,24 @@ class IncidentResponse(BaseModel):
     description: str
     priority: PriorityLevel
     category: Optional[str]
+    source_service: Optional[str] = None
     status: IncidentStatus
-    log_ids: Optional[list[UUID]]
-    log_count: int
-    ai_analysis: Optional[str]
-    ai_solution: Optional[str]
-    ai_model_used: Optional[str]
-    email_sent: bool
-    email_sent_at: Optional[datetime]
-    email_recipient: Optional[str]
-    agent_run_id: Optional[UUID]
-    created_at: datetime
-    updated_at: datetime
-    resolved_at: Optional[datetime]
+    log_ids: Optional[list[UUID]] = None
+    log_count: int = 0
+    ai_analysis: Optional[str] = None
+    ai_solution: Optional[str] = None
+    resolution_runbook: Optional[str] = None
+    ai_model_used: Optional[str] = None
+    historical_match_count: int = 0
+    email_sent: bool = False
+    email_sent_at: Optional[datetime] = None
+    email_recipient: Optional[str] = None
+    agent_run_id: Optional[UUID] = None
+    resolved_by: Optional[str] = None
+    resolution_duration_minutes: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -55,6 +61,7 @@ class IncidentUpdate(BaseModel):
     status: Optional[IncidentStatus] = None
     ai_solution: Optional[str] = None
     resolved_at: Optional[datetime] = None
+    resolved_by: Optional[str] = None
 
 
 class IncidentListResponse(BaseModel):
@@ -70,8 +77,8 @@ class IncidentStatsResponse(BaseModel):
     """Incident statistics for dashboard."""
     total_incidents: int
     open_incidents: int
-    high_priority: int
-    medium_priority: int
-    low_priority: int
+    p1_count: int
+    p2_count: int
+    p3_count: int
     resolved_today: int
     emails_sent_today: int

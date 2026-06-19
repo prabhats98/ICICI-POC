@@ -70,13 +70,25 @@ async def ingest_jsonl(file_path: str):
             if not message:
                 message = payload.get("resultDescription", "") or payload.get("operationName", "")
 
+            # Detect source system from payload
+            resource_provider = payload.get("resourceProvider", "").upper()
+            source_system = "azure-monitor-jsonl-import"
+            if "CDN" in resource_provider or "FRONTDOOR" in resource_provider:
+                source_system = "azure-front-door"
+            elif "NETWORK" in resource_provider and "GATEWAY" in str(payload.get("category", "")):
+                source_system = "azure-app-gateway"
+            elif "APIMANAGEMENT" in resource_provider:
+                source_system = "azure-apim"
+            elif "COMPUTE" in resource_provider:
+                source_system = "azure-vm"
+
             raw_log = RawLog(
                 id=str(uuid.uuid4()),
                 ingested_at=now,
-                source_system="azure-monitor-jsonl-import",
+                source_system=source_system,
                 raw_payload=payload,
                 raw_text=message,
-                is_segregated=False,
+                is_preprocessed=False,
             )
             raw_logs.append(raw_log)
 
@@ -84,8 +96,7 @@ async def ingest_jsonl(file_path: str):
         await session.commit()
 
         print(f"✅ Successfully ingested {len(raw_logs)} log entries into 'raw_logs' table")
-        print(f"   → Source: azure-monitor-jsonl-import")
-        print(f"   → Run the agent pipeline to segregate them into 'cloud_logs'")
+        print(f"   → Run the agent pipeline to preprocess them into 'cloud_logs'")
 
 
 if __name__ == "__main__":

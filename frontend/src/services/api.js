@@ -31,6 +31,13 @@ export const resetAndRunPipeline = () => api.post('/api/agents/reset-and-run');
 export const getAgentStatus = () => api.get('/api/agents/status');
 export const getAgentHistory = (params) => api.get('/api/agents/history', { params });
 
+// --- Pipeline Control ---
+export const getPipelineStatus = () => api.get('/api/pipeline/status');
+export const togglePipeline = (enabled) => api.post('/api/pipeline/toggle', { enabled });
+export const triggerManualRun = () => api.post('/api/pipeline/run');
+export const getPipelineThresholds = () => api.get('/api/pipeline/thresholds');
+export const updatePipelineThresholds = (data) => api.put('/api/pipeline/thresholds', data);
+
 // --- Workflow ---
 export const getWorkflowState = () => api.get('/api/workflow/state');
 

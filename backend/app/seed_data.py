@@ -177,7 +177,7 @@ async def seed_raw_logs(count: int = 50):
                 source_system="azure-monitor",
                 raw_payload=payload,
                 raw_text=sample.get("message", ""),
-                is_segregated=False,
+                is_preprocessed=False,
             )
             raw_logs.append(raw_log)
 

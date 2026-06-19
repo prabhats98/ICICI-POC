@@ -1,12 +1,9 @@
 """
-LangGraph Pipeline - Builds and runs the multi-agent state graph.
+LangGraph Pipeline — 8-agent linear pipeline for Azure Incident Log analysis.
 
-Data Flow (PostgreSQL-centric):
-  raw_logs (DB)
-    → Agent 1: Segregate → cloud_logs (DB, structured & categorized)
-    → Agent 2: Read from DB → Gemini analysis
-    → Agent 3: Classify priority → Incident records (DB)
-    → Agent 4a/4b/4c: Handle by priority → Email / Solution / Log
+Flow:
+  Log Collector → Preprocessing Engine → Classification Agent → Priority Agent
+  → Context Agent → Resolution Agent → Orchestrator Agent → Notification Agent
 """
 
 import time
@@ -15,7 +12,6 @@ import logging
 from datetime import datetime
 from typing import Any
 
-# Fix: LangGraph accesses langchain.debug which doesn't exist in newer langchain-core
 import langchain
 if not hasattr(langchain, "debug"):
     langchain.debug = False
@@ -23,23 +19,20 @@ if not hasattr(langchain, "debug"):
 from langgraph.graph import StateGraph, END
 
 from app.agents.state import PipelineState
-from app.agents.log_extractor import log_extractor_node
-from app.agents.anomaly_detector import anomaly_detector_node
-from app.agents.priority_classifier import priority_classifier_node
-from app.agents.high_priority_handler import high_priority_handler_node
-from app.agents.medium_priority_handler import medium_priority_handler_node
-from app.agents.low_priority_handler import low_priority_handler_node
-from app.agents.deep_code_analyzer import (
-    deep_code_analyzer_high_node,
-    deep_code_analyzer_medium_node,
-    deep_code_analyzer_low_node,
-)
+from app.agents.log_collector import log_collector_node
+from app.agents.preprocessing_engine import preprocessing_engine_node
+from app.agents.classification_agent import classification_agent_node
+from app.agents.priority_agent import priority_agent_node
+from app.agents.context_agent import context_agent_node
+from app.agents.resolution_agent import resolution_agent_node
+from app.agents.orchestrator_agent import orchestrator_agent_node
+from app.agents.notification_agent import notification_agent_node
 from app.database import async_session
 from app.models.agent_run import AgentRun, AgentRunStatus
 
 logger = logging.getLogger(__name__)
 
-# --- WebSocket broadcast callback (set by the API layer) ---
+# --- WebSocket broadcast callback ---
 _broadcast_callback = None
 
 
@@ -50,7 +43,7 @@ def set_broadcast_callback(callback):
 
 
 async def _broadcast(event: str, data: dict):
-    """Broadcast a workflow event via WebSocket if callback is set."""
+    """Broadcast a workflow event via WebSocket."""
     if _broadcast_callback:
         try:
             await _broadcast_callback({"event": event, **data})
@@ -58,362 +51,127 @@ async def _broadcast(event: str, data: dict):
             logger.warning(f"WebSocket broadcast failed: {e}")
 
 
-# --- Wrapper nodes that broadcast status ---
+# --- Node timing tracker ---
+_node_timings: dict[str, float] = {}
 
-async def _extract_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["log_extractor"] = time.time()
+# --- Pipeline node names in execution order ---
+PIPELINE_NODES = [
+    "log_collector",
+    "preprocessing_engine",
+    "classification_agent",
+    "priority_agent",
+    "context_agent",
+    "resolution_agent",
+    "orchestrator_agent",
+    "notification_agent",
+]
+
+NODE_LABELS = {
+    "log_collector": "Collecting Logs",
+    "preprocessing_engine": "Preprocessing",
+    "classification_agent": "Classifying Incidents",
+    "priority_agent": "Assigning Priority",
+    "context_agent": "Looking Up Context",
+    "resolution_agent": "Generating Resolutions",
+    "orchestrator_agent": "Orchestrating",
+    "notification_agent": "Sending Notifications",
+}
+
+# --- Wrapper functions with WebSocket broadcasting ---
+
+
+async def _wrap_node(node_id: str, func, state: PipelineState) -> dict[str, Any]:
+    """Generic wrapper that broadcasts start/complete for any node."""
+    _node_timings[node_id] = time.time()
     await _broadcast("node_active", {
-        "node": "log_extractor",
+        "node": node_id,
         "status": "running",
-        "input": {"description": "Reading unprocessed raw logs from database", "source": "raw_logs table"},
+        "input": {"description": NODE_LABELS.get(node_id, node_id)},
     })
-    result = await log_extractor_node(state)
-    summary = result.get("segregation_summary", {})
-    duration = round(time.time() - _node_timings.get("log_extractor", time.time()), 2)
+
+    result = await func(state)
+
+    duration = round(time.time() - _node_timings.get(node_id, time.time()), 2)
     await _broadcast("node_complete", {
-        "node": "log_extractor",
+        "node": node_id,
         "status": "completed",
         "duration": duration,
-        "output": {
-            "logs_extracted": result.get("total_logs_extracted", 0),
-            "segregation": summary,
-            "description": f"Extracted & segregated {result.get('total_logs_extracted', 0)} logs",
-        },
+        "output": _build_output_summary(node_id, result),
     })
     return result
 
 
-async def _detect_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["anomaly_detector"] = time.time()
-    await _broadcast("node_active", {
-        "node": "anomaly_detector",
-        "status": "running",
-        "input": {
-            "description": f"Analyzing {state.get('total_logs_extracted', 0)} segregated logs with Gemini",
-            "logs_count": state.get("total_logs_extracted", 0),
+def _build_output_summary(node_id: str, result: dict) -> dict:
+    """Build a human-readable output summary for WebSocket broadcast."""
+    summaries = {
+        "log_collector": lambda r: {
+            "description": f"Collected {r.get('total_collected', 0)} logs",
+            "per_source": r.get("per_source", {}),
         },
-    })
-    result = await anomaly_detector_node(state)
-    issues = result.get("issues_found", [])
-    duration = round(time.time() - _node_timings.get("anomaly_detector", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "anomaly_detector",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "issues_found": len(issues),
-            "has_issues": result.get("has_issues", False),
-            "level_distribution": result.get("level_distribution", {}),
-            "category_distribution": result.get("category_distribution", {}),
-            "description": f"Detected {len(issues)} anomalies/issues",
+        "preprocessing_engine": lambda r: {
+            "description": f"Preprocessed {r.get('total_preprocessed', 0)} logs, {r.get('duplicates_removed', 0)} duplicates removed",
         },
-    })
-    return result
-
-
-async def _classify_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["priority_classifier"] = time.time()
-    await _broadcast("node_active", {
-        "node": "priority_classifier",
-        "status": "running",
-        "input": {
-            "description": f"Classifying {len(state.get('issues_found', []))} issues by priority",
-            "issues_count": len(state.get("issues_found", [])),
+        "classification_agent": lambda r: {
+            "description": f"Found {len(r.get('issues_found', []))} issues from {r.get('logs_analyzed', 0)} logs",
         },
-    })
-    result = await priority_classifier_node(state)
-    high = len(result.get("high_priority_incidents", []))
-    medium = len(result.get("medium_priority_incidents", []))
-    low = len(result.get("low_priority_incidents", []))
-    duration = round(time.time() - _node_timings.get("priority_classifier", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "priority_classifier",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "high": high,
-            "medium": medium,
-            "low": low,
-            "total_classified": high + medium + low,
-            "description": f"Classified: {high} HIGH, {medium} MEDIUM, {low} LOW",
+        "priority_agent": lambda r: {
+            "description": f"P1={len(r.get('p1_incidents', []))}, P2={len(r.get('p2_incidents', []))}, P3={len(r.get('p3_incidents', []))}",
         },
-    })
-    return result
-
-
-async def _high_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["high_priority_handler"] = time.time()
-    await _broadcast("node_active", {
-        "node": "high_priority_handler",
-        "status": "running",
-        "input": {
-            "description": f"Handling {len(state.get('high_priority_incidents', []))} HIGH priority incidents",
-            "incidents_count": len(state.get("high_priority_incidents", [])),
-            "analyses_count": len(state.get("deep_analysis_high", [])),
+        "context_agent": lambda r: {
+            "description": f"Enriched {len(r.get('context_enriched_incidents', []))} incidents with historical context",
         },
-    })
-    result = await high_priority_handler_node(state)
-    emails = result.get("emails_sent", [])
-    solutions = result.get("high_priority_solutions", [])
-    duration = round(time.time() - _node_timings.get("high_priority_handler", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "high_priority_handler",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "emails_sent": len(emails),
-            "solutions_generated": len(solutions),
-            "description": f"Sent {len(emails)} emergency alerts, {len(solutions)} solutions",
+        "resolution_agent": lambda r: {
+            "description": f"Generated {len(r.get('resolutions', []))} resolutions",
         },
-    })
-    return result
-
-
-async def _medium_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["medium_priority_handler"] = time.time()
-    await _broadcast("node_active", {
-        "node": "medium_priority_handler",
-        "status": "running",
-        "input": {
-            "description": f"Handling {len(state.get('medium_priority_incidents', []))} MEDIUM priority incidents",
-            "incidents_count": len(state.get("medium_priority_incidents", [])),
-            "analyses_count": len(state.get("deep_analysis_medium", [])),
+        "orchestrator_agent": lambda r: {
+            "description": f"{r.get('summary', {}).get('total_incidents', 0)} incidents, {r.get('summary', {}).get('emails_to_send', 0)} emails queued",
         },
-    })
-    result = await medium_priority_handler_node(state)
-    solutions = result.get("medium_priority_solutions", [])
-    emails = result.get("medium_emails_sent", [])
-    duration = round(time.time() - _node_timings.get("medium_priority_handler", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "medium_priority_handler",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "solutions_generated": len(solutions),
-            "emails_sent": len(emails),
-            "description": f"Generated {len(solutions)} fix reports, sent {len(emails)} emails",
+        "notification_agent": lambda r: {
+            "description": f"{len(r.get('emails_sent', []))} emails sent, {len(r.get('email_failures', []))} failed",
         },
-    })
-    return result
+    }
+    builder = summaries.get(node_id, lambda r: {"description": "Completed"})
+    return builder(result)
 
 
-async def _low_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["low_priority_handler"] = time.time()
-    await _broadcast("node_active", {
-        "node": "low_priority_handler",
-        "status": "running",
-        "input": {
-            "description": f"Handling {len(state.get('low_priority_incidents', []))} LOW priority incidents",
-            "incidents_count": len(state.get("low_priority_incidents", [])),
-            "analyses_count": len(state.get("deep_analysis_low", [])),
-        },
-    })
-    result = await low_priority_handler_node(state)
-    logged = result.get("low_priority_logged", 0)
-    solutions = result.get("low_priority_solutions", [])
-    emails = result.get("low_emails_sent", [])
-    duration = round(time.time() - _node_timings.get("low_priority_handler", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "low_priority_handler",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "logged": logged,
-            "solutions_generated": len(solutions),
-            "emails_sent": len(emails),
-            "description": f"Logged {logged} advisories, sent {len(emails)} digest emails",
-        },
-    })
-    return result
+# --- Create wrapper nodes ---
 
-
-# --- Deep Code Analyzer wrapper nodes ---
-
-async def _deep_analyze_high_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["deep_code_analyzer_high"] = time.time()
-    await _broadcast("node_active", {
-        "node": "deep_code_analyzer_high",
-        "status": "running",
-        "input": {
-            "description": f"Deep analyzing {len(state.get('high_priority_incidents', []))} critical incidents",
-            "incidents_count": len(state.get("high_priority_incidents", [])),
-        },
-    })
-    result = await deep_code_analyzer_high_node(state)
-    analyses = result.get("deep_analysis_high", [])
-    duration = round(time.time() - _node_timings.get("deep_code_analyzer_high", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "deep_code_analyzer_high",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "analyses_completed": len(analyses),
-            "description": f"Completed {len(analyses)} root cause analyses",
-        },
-    })
-    return result
-
-
-async def _deep_analyze_medium_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["deep_code_analyzer_medium"] = time.time()
-    await _broadcast("node_active", {
-        "node": "deep_code_analyzer_medium",
-        "status": "running",
-        "input": {
-            "description": f"Analyzing impact of {len(state.get('medium_priority_incidents', []))} incidents",
-            "incidents_count": len(state.get("medium_priority_incidents", [])),
-        },
-    })
-    result = await deep_code_analyzer_medium_node(state)
-    analyses = result.get("deep_analysis_medium", [])
-    duration = round(time.time() - _node_timings.get("deep_code_analyzer_medium", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "deep_code_analyzer_medium",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "analyses_completed": len(analyses),
-            "description": f"Completed {len(analyses)} impact assessments",
-        },
-    })
-    return result
-
-
-async def _deep_analyze_low_node(state: PipelineState) -> dict[str, Any]:
-    _node_timings["deep_code_analyzer_low"] = time.time()
-    await _broadcast("node_active", {
-        "node": "deep_code_analyzer_low",
-        "status": "running",
-        "input": {
-            "description": f"Analyzing trends in {len(state.get('low_priority_incidents', []))} low-priority items",
-            "incidents_count": len(state.get("low_priority_incidents", [])),
-        },
-    })
-    result = await deep_code_analyzer_low_node(state)
-    analyses = result.get("deep_analysis_low", [])
-    duration = round(time.time() - _node_timings.get("deep_code_analyzer_low", time.time()), 2)
-    await _broadcast("node_complete", {
-        "node": "deep_code_analyzer_low",
-        "status": "completed",
-        "duration": duration,
-        "output": {
-            "analyses_completed": len(analyses),
-            "description": f"Completed {len(analyses)} trend analyses",
-        },
-    })
-    return result
-
-
-# --- Routing logic ---
-
-def should_continue_after_extraction(state: PipelineState) -> str:
-    """After extraction & segregation, always continue to anomaly detection.
-    
-    Agent 2 queries unprocessed cloud_logs from the DB independently,
-    so it may find logs even when Agent 1 didn't extract new ones
-    (e.g., from a previous run that was interrupted before analysis).
-    """
-    return "anomaly_detector"
-
-
-def route_after_classification(state: PipelineState) -> str:
-    """After classification, route to deep analysis based on detected priorities."""
-    has_high = len(state.get("high_priority_incidents", [])) > 0
-    has_medium = len(state.get("medium_priority_incidents", [])) > 0
-
-    if has_high:
-        return "deep_code_analyzer_high"
-    elif has_medium:
-        return "deep_code_analyzer_medium"
-    else:
-        return "deep_code_analyzer_low"
-
-
-def route_after_high(state: PipelineState) -> str:
-    """After high priority, check if medium needs handling."""
-    if len(state.get("medium_priority_incidents", [])) > 0:
-        return "deep_code_analyzer_medium"
-    elif len(state.get("low_priority_incidents", [])) > 0:
-        return "deep_code_analyzer_low"
-    return END
-
-
-def route_after_medium(state: PipelineState) -> str:
-    """After medium priority, check if low needs handling."""
-    if len(state.get("low_priority_incidents", [])) > 0:
-        return "deep_code_analyzer_low"
-    return END
+async def _node_log_collector(state): return await _wrap_node("log_collector", log_collector_node, state)
+async def _node_preprocessing(state): return await _wrap_node("preprocessing_engine", preprocessing_engine_node, state)
+async def _node_classification(state): return await _wrap_node("classification_agent", classification_agent_node, state)
+async def _node_priority(state): return await _wrap_node("priority_agent", priority_agent_node, state)
+async def _node_context(state): return await _wrap_node("context_agent", context_agent_node, state)
+async def _node_resolution(state): return await _wrap_node("resolution_agent", resolution_agent_node, state)
+async def _node_orchestrator(state): return await _wrap_node("orchestrator_agent", orchestrator_agent_node, state)
+async def _node_notification(state): return await _wrap_node("notification_agent", notification_agent_node, state)
 
 
 # --- Build the graph ---
 
 def build_pipeline() -> StateGraph:
-    """Build the LangGraph multi-agent pipeline."""
+    """Build the 8-agent linear LangGraph pipeline."""
     graph = StateGraph(PipelineState)
 
     # Add nodes
-    graph.add_node("log_extractor", _extract_node)
-    graph.add_node("anomaly_detector", _detect_node)
-    graph.add_node("priority_classifier", _classify_node)
-    graph.add_node("deep_code_analyzer_high", _deep_analyze_high_node)
-    graph.add_node("deep_code_analyzer_medium", _deep_analyze_medium_node)
-    graph.add_node("deep_code_analyzer_low", _deep_analyze_low_node)
-    graph.add_node("high_priority_handler", _high_node)
-    graph.add_node("medium_priority_handler", _medium_node)
-    graph.add_node("low_priority_handler", _low_node)
+    graph.add_node("log_collector", _node_log_collector)
+    graph.add_node("preprocessing_engine", _node_preprocessing)
+    graph.add_node("classification_agent", _node_classification)
+    graph.add_node("priority_agent", _node_priority)
+    graph.add_node("context_agent", _node_context)
+    graph.add_node("resolution_agent", _node_resolution)
+    graph.add_node("orchestrator_agent", _node_orchestrator)
+    graph.add_node("notification_agent", _node_notification)
 
-    # Set entry point
-    graph.set_entry_point("log_extractor")
-
-    # Add edges
-    graph.add_conditional_edges(
-        "log_extractor",
-        should_continue_after_extraction,
-        {
-            "anomaly_detector": "anomaly_detector",
-            END: END,
-        },
-    )
-
-    graph.add_edge("anomaly_detector", "priority_classifier")
-
-    # Classifier routes to deep analysis nodes first
-    graph.add_conditional_edges(
-        "priority_classifier",
-        route_after_classification,
-        {
-            "deep_code_analyzer_high": "deep_code_analyzer_high",
-            "deep_code_analyzer_medium": "deep_code_analyzer_medium",
-            "deep_code_analyzer_low": "deep_code_analyzer_low",
-        },
-    )
-
-    # Deep analysis → Handler
-    graph.add_edge("deep_code_analyzer_high", "high_priority_handler")
-    graph.add_edge("deep_code_analyzer_medium", "medium_priority_handler")
-    graph.add_edge("deep_code_analyzer_low", "low_priority_handler")
-
-    # After handlers, check remaining priorities
-    graph.add_conditional_edges(
-        "high_priority_handler",
-        route_after_high,
-        {
-            "deep_code_analyzer_medium": "deep_code_analyzer_medium",
-            "deep_code_analyzer_low": "deep_code_analyzer_low",
-            END: END,
-        },
-    )
-
-    graph.add_conditional_edges(
-        "medium_priority_handler",
-        route_after_medium,
-        {
-            "deep_code_analyzer_low": "deep_code_analyzer_low",
-            END: END,
-        },
-    )
-
-    graph.add_edge("low_priority_handler", END)
+    # Linear pipeline — no branching
+    graph.set_entry_point("log_collector")
+    graph.add_edge("log_collector", "preprocessing_engine")
+    graph.add_edge("preprocessing_engine", "classification_agent")
+    graph.add_edge("classification_agent", "priority_agent")
+    graph.add_edge("priority_agent", "context_agent")
+    graph.add_edge("context_agent", "resolution_agent")
+    graph.add_edge("resolution_agent", "orchestrator_agent")
+    graph.add_edge("orchestrator_agent", "notification_agent")
+    graph.add_edge("notification_agent", END)
 
     return graph
 
@@ -421,32 +179,29 @@ def build_pipeline() -> StateGraph:
 # Compiled graph (singleton)
 pipeline = build_pipeline().compile()
 
-# Timing tracker for per-node durations
-_node_timings: dict[str, float] = {}
-
 
 async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
     """
-    Execute the full agent pipeline.
+    Execute the full 8-agent pipeline.
 
-    Data flows through PostgreSQL between agents:
-    1. Agent 1 reads raw_logs → segregates → stores in cloud_logs
-    2. Agent 2 reads cloud_logs from DB → analyzes with Gemini
-    3. Agent 3+ classifies and handles based on priority
-    
     Args:
         trigger_type: "manual" or "scheduler"
-    
+
     Returns:
         Pipeline result summary
     """
+    from app.services.scheduler_service import is_pipeline_enabled
+
+    if not is_pipeline_enabled():
+        logger.info("Pipeline is disabled, skipping run")
+        return {"status": "disabled", "message": "Pipeline is currently disabled"}
+
     run_id = str(uuid.uuid4())
-    pipeline_start_time = time.time()
+    pipeline_start = time.time()
     _node_timings.clear()
     logger.info(f"Pipeline run started: {run_id} (trigger: {trigger_type})")
 
     # Create AgentRun record
-    agent_run = None
     try:
         async with async_session() as session:
             agent_run = AgentRun(
@@ -461,49 +216,49 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"Failed to create AgentRun record: {e}")
 
-    # Broadcast pipeline start
     await _broadcast("pipeline_start", {"run_id": run_id, "trigger": trigger_type})
 
-    # Initial state — data flows through PostgreSQL, not the state dict
+    # Initial state
     initial_state: PipelineState = {
         "run_id": run_id,
         "trigger_type": trigger_type,
         "started_at": datetime.utcnow().isoformat(),
         "current_agent": "starting",
         "status": "running",
-        "segregated_log_ids": [],
-        "total_logs_extracted": 0,
-        "segregation_summary": {},
+        "total_collected": 0,
+        "per_source": {},
+        "raw_log_ids": [],
+        "total_preprocessed": 0,
+        "level_counts": {},
+        "category_counts": {},
+        "cloud_log_ids": [],
+        "duplicates_removed": 0,
         "issues_found": [],
         "has_issues": False,
-        "level_distribution": {},
-        "category_distribution": {},
+        "logs_analyzed": 0,
         "classified_issues": [],
-        "high_priority_incidents": [],
-        "medium_priority_incidents": [],
-        "low_priority_incidents": [],
-        "deep_analysis_high": [],
-        "deep_analysis_medium": [],
-        "deep_analysis_low": [],
-        "high_priority_solutions": [],
-        "medium_priority_solutions": [],
-        "low_priority_solutions": [],
+        "p1_incidents": [],
+        "p2_incidents": [],
+        "p3_incidents": [],
+        "context_enriched_incidents": [],
+        "resolutions": [],
+        "summary": {},
+        "notifications_to_send": [],
         "emails_sent": [],
-        "medium_emails_sent": [],
-        "low_emails_sent": [],
-        "low_priority_logged": 0,
+        "email_failures": [],
         "export_paths": [],
         "errors": [],
     }
 
     try:
-        # Run the pipeline
         result = await pipeline.ainvoke(initial_state)
+
+        total_duration = round(time.time() - pipeline_start, 2)
+        summary = result.get("summary", {})
 
         # Update AgentRun record
         try:
             async with async_session() as session:
-                # pyrefly: ignore [missing-import]
                 from sqlalchemy import update
                 await session.execute(
                     update(AgentRun)
@@ -511,73 +266,40 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
                     .values(
                         status=AgentRunStatus.SUCCESS,
                         completed_at=datetime.utcnow(),
-                        logs_processed=result.get("logs_analyzed", 0) or result.get("total_logs_extracted", 0),
-                        incidents_created=len(result.get("classified_issues", [])),
-                        high_priority_count=len(result.get("high_priority_incidents", [])),
-                        medium_priority_count=len(result.get("medium_priority_incidents", [])),
-                        low_priority_count=len(result.get("low_priority_incidents", [])),
+                        duration_seconds=total_duration,
+                        logs_processed=summary.get("total_preprocessed", 0),
+                        incidents_created=summary.get("total_incidents", 0),
+                        p1_count=summary.get("p1_count", 0),
+                        p2_count=summary.get("p2_count", 0),
+                        p3_count=summary.get("p3_count", 0),
                         emails_sent=len(result.get("emails_sent", [])),
+                        sources_collected=summary.get("per_source", {}),
                     )
                 )
                 await session.commit()
         except Exception as e:
             logger.warning(f"Failed to update AgentRun record: {e}")
 
-        total_duration = round(time.time() - pipeline_start_time, 2)
         await _broadcast("pipeline_complete", {
             "run_id": run_id,
             "status": "completed",
             "duration": total_duration,
-            "summary": {
-                "total_duration": total_duration,
-                "logs_processed": result.get("logs_analyzed", 0) or result.get("total_logs_extracted", 0),
-                "segregation": result.get("segregation_summary", {}),
-                "issues_found": len(result.get("issues_found", [])),
-                "level_distribution": result.get("level_distribution", {}),
-                "category_distribution": result.get("category_distribution", {}),
-                "high_priority": len(result.get("high_priority_incidents", [])),
-                "medium_priority": len(result.get("medium_priority_incidents", [])),
-                "low_priority": len(result.get("low_priority_incidents", [])),
-                "total_incidents": len(result.get("classified_issues", [])),
-                "deep_analyses": {
-                    "high": len(result.get("deep_analysis_high", [])),
-                    "medium": len(result.get("deep_analysis_medium", [])),
-                    "low": len(result.get("deep_analysis_low", [])),
-                },
-                "emails_sent": {
-                    "high": len(result.get("emails_sent", [])),
-                    "medium": len(result.get("medium_emails_sent", [])),
-                    "low": len(result.get("low_emails_sent", [])),
-                },
-                "solutions": {
-                    "high": len(result.get("high_priority_solutions", [])),
-                    "medium": len(result.get("medium_priority_solutions", [])),
-                    "low": len(result.get("low_priority_solutions", [])),
-                },
-                "errors": result.get("errors", []),
-            },
+            "summary": summary,
         })
 
-        logger.info(f"Pipeline run completed: {run_id}")
+        logger.info(f"Pipeline run completed: {run_id} in {total_duration}s")
         return {
             "run_id": run_id,
             "status": "completed",
-            "logs_processed": result.get("total_logs_extracted", 0),
-            "issues_found": len(result.get("issues_found", [])),
-            "high_priority": len(result.get("high_priority_incidents", [])),
-            "medium_priority": len(result.get("medium_priority_incidents", [])),
-            "low_priority": len(result.get("low_priority_incidents", [])),
-            "emails_sent": len(result.get("emails_sent", [])),
-            "export_paths": result.get("export_paths", []),
+            "duration": total_duration,
+            "summary": summary,
         }
 
     except Exception as e:
         logger.error(f"Pipeline run failed: {run_id}: {e}")
 
-        # Update AgentRun as failed
         try:
             async with async_session() as session:
-                # pyrefly: ignore [missing-import]
                 from sqlalchemy import update
                 await session.execute(
                     update(AgentRun)
@@ -585,6 +307,7 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
                     .values(
                         status=AgentRunStatus.FAILED,
                         completed_at=datetime.utcnow(),
+                        duration_seconds=round(time.time() - pipeline_start, 2),
                         error_message=str(e),
                     )
                 )
@@ -594,8 +317,4 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
 
         await _broadcast("pipeline_error", {"run_id": run_id, "error": str(e)})
 
-        return {
-            "run_id": run_id,
-            "status": "failed",
-            "error": str(e),
-        }
+        return {"run_id": run_id, "status": "failed", "error": str(e)}

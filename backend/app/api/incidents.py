@@ -4,7 +4,7 @@ Incidents API Router - CRUD operations for classified incidents.
 
 import math
 from uuid import UUID
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -30,6 +30,7 @@ async def list_incidents(
     priority: Optional[PriorityLevel] = None,
     status: Optional[IncidentStatus] = None,
     category: Optional[str] = None,
+    source_service: Optional[str] = None,
     search: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -46,6 +47,9 @@ async def list_incidents(
     if category:
         query = query.where(Incident.category.ilike(f"%{category}%"))
         count_query = count_query.where(Incident.category.ilike(f"%{category}%"))
+    if source_service:
+        query = query.where(Incident.source_service.ilike(f"%{source_service}%"))
+        count_query = count_query.where(Incident.source_service.ilike(f"%{source_service}%"))
     if search:
         query = query.where(Incident.title.ilike(f"%{search}%"))
         count_query = count_query.where(Incident.title.ilike(f"%{search}%"))
@@ -76,14 +80,14 @@ async def get_incident_stats(db: AsyncSession = Depends(get_db)):
         select(func.count(Incident.id)).where(Incident.status == IncidentStatus.OPEN)
     )).scalar() or 0
 
-    high = (await db.execute(
-        select(func.count(Incident.id)).where(Incident.priority == PriorityLevel.HIGH)
+    p1 = (await db.execute(
+        select(func.count(Incident.id)).where(Incident.priority == PriorityLevel.P1)
     )).scalar() or 0
-    medium = (await db.execute(
-        select(func.count(Incident.id)).where(Incident.priority == PriorityLevel.MEDIUM)
+    p2 = (await db.execute(
+        select(func.count(Incident.id)).where(Incident.priority == PriorityLevel.P2)
     )).scalar() or 0
-    low = (await db.execute(
-        select(func.count(Incident.id)).where(Incident.priority == PriorityLevel.LOW)
+    p3 = (await db.execute(
+        select(func.count(Incident.id)).where(Incident.priority == PriorityLevel.P3)
     )).scalar() or 0
 
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -108,16 +112,16 @@ async def get_incident_stats(db: AsyncSession = Depends(get_db)):
     return IncidentStatsResponse(
         total_incidents=total,
         open_incidents=open_count,
-        high_priority=high,
-        medium_priority=medium,
-        low_priority=low,
+        p1_count=p1,
+        p2_count=p2,
+        p3_count=p3,
         resolved_today=resolved_today,
         emails_sent_today=emails_today,
     )
 
 
 @router.get("/{incident_id}", response_model=IncidentResponse)
-async def get_incident(incident_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_incident(incident_id: str, db: AsyncSession = Depends(get_db)):
     """Get a single incident with full details."""
     result = await db.execute(select(Incident).where(Incident.id == incident_id))
     incident = result.scalar_one_or_none()
@@ -128,7 +132,7 @@ async def get_incident(incident_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/{incident_id}", response_model=IncidentResponse)
 async def update_incident(
-    incident_id: UUID,
+    incident_id: str,
     update_data: IncidentUpdate,
     db: AsyncSession = Depends(get_db),
 ):

@@ -7,7 +7,7 @@ import useAppStore from '../store/useAppStore';
 
 export default function Sidebar() {
   const { dashboard, wsConnected } = useAppStore();
-  const highCount = dashboard?.incidents?.high_priority || 0;
+  const p1Count = dashboard?.incidents?.p1 || 0;
 
   return (
     <aside className="sidebar">
@@ -15,7 +15,7 @@ export default function Sidebar() {
         <div className="logo-icon">🛡️</div>
         <div>
           <div className="logo-text">CloudGuard</div>
-          <div className="logo-subtitle">Banking Log Analyser</div>
+          <div className="logo-subtitle">Azure Incident Pipeline</div>
         </div>
       </div>
 
@@ -38,7 +38,7 @@ export default function Sidebar() {
         <NavLink to="/incidents" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <span className="nav-icon">⚠️</span>
           Incidents
-          {highCount > 0 && <span className="nav-badge">{highCount}</span>}
+          {p1Count > 0 && <span className="nav-badge">{p1Count}</span>}
         </NavLink>
 
         <div className="sidebar-section-label">System</div>

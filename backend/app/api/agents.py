@@ -1,132 +1,104 @@
 """
-Agents API Router - Trigger and monitor the agent pipeline.
+Agents API — Pipeline trigger, status, and history endpoints.
 """
 
-import math
-from uuid import UUID
-from typing import Optional
+import logging
+from fastapi import APIRouter
+from sqlalchemy import select, desc, func
 
-from fastapi import APIRouter, Depends, Query, BackgroundTasks
-from sqlalchemy import select, func, desc
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.database import get_db
+from app.database import async_session
 from app.models.agent_run import AgentRun, AgentRunStatus
-from app.schemas.agent_schemas import (
-    AgentRunResponse,
-    AgentRunListResponse,
-    PipelineTriggerRequest,
-    PipelineTriggerResponse,
-)
-from app.agents.graph import run_pipeline
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
 
-@router.post("/run", response_model=PipelineTriggerResponse)
-async def trigger_pipeline(
-    request: PipelineTriggerRequest,
-    background_tasks: BackgroundTasks,
-):
-    """Manually trigger the agent pipeline."""
-    import uuid
-
-    run_id = uuid.uuid4()
-
-    # Run pipeline in background
-    background_tasks.add_task(run_pipeline, request.trigger_type)
-
-    return PipelineTriggerResponse(
-        run_id=run_id,
-        status="started",
-        message="Agent pipeline triggered successfully. Check /api/agents/history for results.",
-    )
+@router.post("/run")
+async def trigger_run(body: dict = {}):
+    """Trigger a manual pipeline run."""
+    import asyncio
+    from app.agents.graph import run_pipeline
+    asyncio.create_task(run_pipeline(trigger_type=body.get("trigger_type", "manual")))
+    return {"status": "started", "message": "Pipeline run triggered"}
 
 
-@router.post("/reset-and-run", response_model=PipelineTriggerResponse)
-async def reset_and_run(
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-):
-    """Reset all processing flags and run the pipeline fresh."""
-    import uuid
-    from sqlalchemy import update as sql_update
-    from app.models.cloud_log import CloudLog
-    from app.models.raw_log import RawLog
-
-    # Reset cloud_logs.is_processed
-    await db.execute(sql_update(CloudLog).values(is_processed=False))
-    # Reset raw_logs.is_segregated
-    await db.execute(sql_update(RawLog).values(is_segregated=False))
-    await db.commit()
-
-    # Reset Firestore is_ingested flags
-    try:
-        from app.services.firestore_service import FirestoreService
-        fs = FirestoreService()
-        fs.reset_ingestion_flags()
-    except Exception as e:
-        pass  # Non-critical — Firestore reset is optional
-
-    run_id = uuid.uuid4()
-    background_tasks.add_task(run_pipeline, "manual")
-
-    return PipelineTriggerResponse(
-        run_id=run_id,
-        status="started",
-        message="All flags reset. Pipeline re-running with fresh data.",
-    )
-
-
-@router.get("/history", response_model=AgentRunListResponse)
-async def list_agent_runs(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=50),
-    status: Optional[AgentRunStatus] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    """List agent pipeline run history."""
-    query = select(AgentRun)
-    count_query = select(func.count(AgentRun.id))
-
-    if status:
-        query = query.where(AgentRun.status == status)
-        count_query = count_query.where(AgentRun.status == status)
-
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-
-    offset = (page - 1) * page_size
-    query = query.order_by(desc(AgentRun.started_at)).offset(offset).limit(page_size)
-
-    result = await db.execute(query)
-    runs = result.scalars().all()
-
-    return AgentRunListResponse(
-        items=[AgentRunResponse.model_validate(run) for run in runs],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
+@router.post("/reset-and-run")
+async def reset_and_run():
+    """Reset pipeline state and run."""
+    import asyncio
+    from app.agents.graph import run_pipeline
+    asyncio.create_task(run_pipeline(trigger_type="manual"))
+    return {"status": "started", "message": "Pipeline reset and run triggered"}
 
 
 @router.get("/status")
-async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
-    """Get the status of the most recent pipeline run."""
-    result = await db.execute(
-        select(AgentRun).order_by(desc(AgentRun.started_at)).limit(1)
-    )
-    latest_run = result.scalar_one_or_none()
+async def agent_status():
+    """Get current pipeline status."""
+    from app.services.scheduler_service import is_pipeline_enabled, get_next_run_time
 
-    if not latest_run:
-        return {
-            "is_running": False,
-            "last_run": None,
-            "message": "No pipeline runs found",
-        }
+    async with async_session() as session:
+        result = await session.execute(
+            select(AgentRun).order_by(desc(AgentRun.started_at)).limit(1)
+        )
+        last_run = result.scalar_one_or_none()
 
     return {
-        "is_running": latest_run.status == AgentRunStatus.RUNNING,
-        "last_run": AgentRunResponse.model_validate(latest_run),
-        "message": f"Last run: {latest_run.status.value}",
+        "pipeline_enabled": is_pipeline_enabled(),
+        "is_running": last_run.status == AgentRunStatus.RUNNING if last_run else False,
+        "next_run_at": str(get_next_run_time()) if get_next_run_time() else None,
+        "last_run": {
+            "id": last_run.id,
+            "status": last_run.status.value,
+            "trigger_type": last_run.trigger_type,
+            "started_at": str(last_run.started_at),
+            "completed_at": str(last_run.completed_at) if last_run.completed_at else None,
+            "duration_seconds": last_run.duration_seconds,
+            "logs_processed": last_run.logs_processed,
+            "incidents_created": last_run.incidents_created,
+            "p1_count": last_run.p1_count,
+            "p2_count": last_run.p2_count,
+            "p3_count": last_run.p3_count,
+            "emails_sent": last_run.emails_sent,
+        } if last_run else None,
+    }
+
+
+@router.get("/history")
+async def agent_history(page: int = 1, page_size: int = 10):
+    """Get pipeline run history."""
+    async with async_session() as session:
+        total = (await session.execute(select(func.count(AgentRun.id)))).scalar() or 0
+
+        result = await session.execute(
+            select(AgentRun)
+            .order_by(desc(AgentRun.started_at))
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        runs = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "agent_name": r.agent_name,
+                "status": r.status.value,
+                "trigger_type": r.trigger_type,
+                "started_at": str(r.started_at),
+                "completed_at": str(r.completed_at) if r.completed_at else None,
+                "duration_seconds": r.duration_seconds,
+                "logs_processed": r.logs_processed,
+                "incidents_created": r.incidents_created,
+                "p1_count": r.p1_count,
+                "p2_count": r.p2_count,
+                "p3_count": r.p3_count,
+                "emails_sent": r.emails_sent,
+                "error_message": r.error_message,
+            }
+            for r in runs
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
     }

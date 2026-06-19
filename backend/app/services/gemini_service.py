@@ -1,6 +1,6 @@
 """
-Gemini Service - Interface to Vertex AI Gemini 2.5 Flash for log analysis,
-priority classification, and solution generation.
+Gemini Service — Interface to Vertex AI Gemini for log analysis,
+priority classification, context-aware resolution, and email generation.
 """
 
 import json
@@ -19,38 +19,34 @@ settings = get_settings()
 
 def _parse_json(text: str) -> dict:
     """Parse JSON from Gemini response, handling common formatting issues."""
-    # Strip markdown code fences if present
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*\n?", "", text)
         text = re.sub(r"\n?```\s*$", "", text)
-    
-    # Try direct parse first
+
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    
-    # Remove trailing commas before } or ]
+
     cleaned = re.sub(r",\s*([}\]])", r"\1", text)
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
-    
-    # Try to find the first { ... } block
+
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group())
         except json.JSONDecodeError:
             pass
-    
+
     raise json.JSONDecodeError(f"Could not parse Gemini response", text, 0)
 
 
 class GeminiService:
-    """Service for interacting with Gemini 2.5 Flash via Vertex AI."""
+    """Service for interacting with Gemini via Vertex AI."""
 
     def __init__(self):
         self.client = genai.Client(
@@ -60,12 +56,10 @@ class GeminiService:
         )
         self.model = settings.gemini_model
 
-    async def analyze_logs(self, logs: list[dict[str, Any]]) -> dict[str, Any]:
+    async def classify_logs(self, logs: list[dict[str, Any]]) -> dict[str, Any]:
         """
-        Agent 2: Analyze cloud logs for anomalies, spikes, and errors.
-        Returns structured analysis with severity scores.
+        Classification Agent: Analyze logs for incident type, intent, severity.
         """
-        # Compact logs to reduce token usage — truncate messages, drop verbose fields
         compact_logs = []
         for i, log in enumerate(logs):
             compact_logs.append({
@@ -83,43 +77,45 @@ class GeminiService:
         logger.info(f"Sending {len(compact_logs)} logs to Gemini ({len(logs_text)} chars)")
 
         prompt = f"""You are an expert Azure cloud infrastructure analyst for a banking system.
+The logs come from Azure Front Door, Azure Application Gateway, Azure API Management, and Azure VM.
+
 Analyze the following cloud logs and identify:
-1. Errors and exceptions
-2. Anomalous patterns or spikes
-3. Security-related events
-4. Performance degradation indicators
-5. Service health issues
+1. Errors and exceptions (5xx, timeouts, auth failures)
+2. Traffic anomalies and spikes
+3. Security-related events (WAF blocks, brute force, unauthorized)
+4. Performance degradation (high latency, backend slowdowns)
+5. Service health issues (unhealthy backends, probe failures)
 
 For each issue found, provide:
 - A clear title
 - Severity score (1-10, where 10 is most critical)
-- Affected Azure service/resource
-- Brief description of the issue
+- Affected Azure service
+- Incident type (e.g., "Traffic Surge", "Auth Failure", "Backend Timeout")
+- Brief description
 - Potential root cause
 
-Return your analysis as a valid JSON object with this structure:
+Return as valid JSON:
 {{
   "total_logs_analyzed": <int>,
   "issues_found": <int>,
-  "summary": "<brief overall assessment>",
+  "summary": "<brief assessment>",
   "issues": [
     {{
-      "title": "<issue title>",
+      "title": "<title>",
       "severity": <1-10>,
-      "affected_service": "<service name>",
+      "affected_service": "<service>",
+      "incident_type": "<type>",
       "description": "<description>",
-      "root_cause": "<potential root cause>",
-      "related_log_indices": [<indices of related logs>]
+      "root_cause": "<cause>",
+      "related_log_indices": [<indices>]
     }}
   ]
 }}
 
-LOGS TO ANALYZE:
+LOGS:
 {logs_text}"""
 
         max_retries = 2
-        last_error = None
-
         for attempt in range(max_retries + 1):
             try:
                 response = self.client.models.generate_content(
@@ -132,77 +128,69 @@ LOGS TO ANALYZE:
                     ),
                 )
 
-                # Safely access response.text — it can raise ValueError if blocked
                 try:
                     response_text = response.text or ""
-                except (ValueError, AttributeError) as e:
-                    logger.warning(f"Gemini response.text raised {type(e).__name__}: {e}")
+                except (ValueError, AttributeError):
                     response_text = ""
 
                 if not response_text.strip():
-                    logger.warning(
-                        f"Gemini returned empty response (attempt {attempt + 1}/{max_retries + 1}). "
-                        f"Candidates: {getattr(response, 'candidates', 'N/A')}"
-                    )
                     if attempt < max_retries:
                         import asyncio
                         await asyncio.sleep(2)
                         continue
-                    return {
-                        "total_logs_analyzed": len(logs),
-                        "issues_found": 0,
-                        "summary": "Gemini returned empty responses after retries — possible safety filter or token limit.",
-                        "issues": [],
-                    }
+                    return {"total_logs_analyzed": len(logs), "issues_found": 0, "summary": "Empty response", "issues": []}
 
                 result = _parse_json(response_text)
-                logger.info(f"Gemini analysis complete: {result.get('issues_found', 0)} issues found")
+                logger.info(f"Classification complete: {result.get('issues_found', 0)} issues")
                 return result
 
             except Exception as e:
-                last_error = e
-                logger.error(f"Gemini analysis attempt {attempt + 1} failed: {e}")
+                logger.error(f"Classification attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries:
                     import asyncio
                     await asyncio.sleep(2)
                     continue
                 raise
 
-    async def classify_priority(self, issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def assign_priority(self, issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
-        Agent 3: Classify each issue into HIGH, MEDIUM, or LOW priority.
+        Priority Agent: Classify each issue into P1 / P2 / P3.
         """
         issues_text = json.dumps(issues, indent=2, default=str)
 
         prompt = f"""You are a banking cloud operations priority classifier.
-Classify each of the following detected issues into priority levels:
+Classify each issue into priority levels:
 
-- HIGH: Critical production issues affecting banking services, security breaches,
-  data loss risks, service outages, authentication failures at scale
-- MEDIUM: Performance degradation, non-critical errors recurring, resource usage anomalies,
-  issues that need attention but are not immediately service-impacting
-- LOW: Informational events, minor warnings, expected maintenance events,
+- P1: Critical production outage, active security breach, data loss risk,
+  service down, authentication failures at scale
+- P2: Performance degradation, recurring non-critical errors, resource
+  approaching limits, needs attention but not immediately service-impacting
+- P3: Informational events, minor warnings, expected maintenance,
   non-impacting configuration changes
 
-For each issue, also provide:
-- A detailed category (e.g., "Authentication Failure", "Resource Exhaustion", "Network Timeout")
-- An enriched description with banking context
+For each issue, provide:
+- Priority: P1, P2, or P3
+- A detailed category
+- Banking-context enriched description
+- Justification for the priority level
 
 Return as valid JSON:
 {{
   "classified_issues": [
     {{
       "original_title": "<from input>",
-      "priority": "HIGH|MEDIUM|LOW",
+      "priority": "P1|P2|P3",
       "category": "<detailed category>",
+      "incident_type": "<type>",
       "enriched_description": "<banking-context description>",
       "severity": <original severity>,
-      "justification": "<why this priority>"
+      "justification": "<why this priority>",
+      "affected_service": "<service>"
     }}
   ]
 }}
 
-ISSUES TO CLASSIFY:
+ISSUES:
 {issues_text}"""
 
         try:
@@ -216,18 +204,27 @@ ISSUES TO CLASSIFY:
                 ),
             )
             result = _parse_json(response.text)
-            logger.info(f"Priority classification complete")
             return result.get("classified_issues", [])
         except Exception as e:
-            logger.error(f"Priority classification failed: {e}")
+            logger.error(f"Priority assignment failed: {e}")
             raise
 
-    async def generate_solution(self, incident: dict[str, Any]) -> str:
+    async def generate_resolution(
+        self, incident: dict[str, Any], historical_context: list[dict] | None = None
+    ) -> str:
         """
-        Agent 4a/4b: Generate a detailed solution for an incident.
+        Resolution Agent: Generate a recommended fix or runbook.
+        Includes historical context from past similar incidents.
         """
+        context_section = ""
+        if historical_context:
+            context_section = "\n\nHISTORICAL CONTEXT (similar past incidents and their fixes):\n"
+            for ctx in historical_context[:3]:
+                context_section += f"- Past incident: {ctx.get('title', 'N/A')}\n"
+                context_section += f"  Fix applied: {(ctx.get('solution', 'N/A') or 'N/A')[:300]}\n"
+
         prompt = f"""You are a senior Azure cloud solutions architect for a banking institution.
-A critical incident has been detected in the banking cloud infrastructure.
+An incident has been detected in the banking cloud infrastructure.
 
 INCIDENT DETAILS:
 - Title: {incident.get('title', 'Unknown')}
@@ -236,8 +233,9 @@ INCIDENT DETAILS:
 - Description: {incident.get('description', 'No description')}
 - Affected Service: {incident.get('affected_service', 'Unknown')}
 - Root Cause: {incident.get('root_cause', 'Unknown')}
+{context_section}
 
-Provide a comprehensive solution including:
+Provide a comprehensive resolution including:
 1. **Immediate Action Steps** (what to do right now)
 2. **Root Cause Resolution** (how to fix the underlying issue)
 3. **Prevention Measures** (how to prevent recurrence)
@@ -245,7 +243,7 @@ Provide a comprehensive solution including:
 5. **Rollback Plan** (if the fix causes issues)
 
 Be specific with Azure CLI commands, configuration changes, and best practices.
-Format the response in clear, actionable Markdown."""
+Format in clear, actionable Markdown."""
 
         try:
             response = self.client.models.generate_content(
@@ -256,25 +254,21 @@ Format the response in clear, actionable Markdown."""
                     max_output_tokens=4096,
                 ),
             )
-            logger.info(f"Solution generated for incident: {incident.get('title', 'Unknown')}")
             return response.text
         except Exception as e:
-            logger.error(f"Solution generation failed: {e}")
+            logger.error(f"Resolution generation failed: {e}")
             raise
 
     async def generate_email_body(
         self, incident: dict[str, Any], solution: str
     ) -> dict[str, str]:
-        """
-        Generate a professional email body for high-priority alerts.
-        Returns dict with 'subject' and 'body' keys.
-        """
+        """Generate a professional email body for incident alerts."""
         prompt = f"""Generate a professional, urgent email for a banking production manager
-about a critical cloud infrastructure incident.
+about a cloud infrastructure incident.
 
 INCIDENT:
 - Title: {incident.get('title', 'Unknown')}
-- Priority: {incident.get('priority', 'HIGH')}
+- Priority: {incident.get('priority', 'P1')}
 - Category: {incident.get('category', 'Unknown')}
 - Description: {incident.get('description', '')}
 
@@ -282,9 +276,8 @@ PROPOSED SOLUTION:
 {solution}
 
 Return as JSON with 'subject' and 'body' keys.
-The body should be in HTML format suitable for an email client.
-Include severity indicators, clear action items, and the proposed solution.
-Keep it professional and urgent but not panicked."""
+The body should be in HTML format.
+Include severity indicators, clear action items, and the proposed solution."""
 
         try:
             response = self.client.models.generate_content(
@@ -296,15 +289,14 @@ Keep it professional and urgent but not panicked."""
                     response_mime_type="application/json",
                 ),
             )
-            result = _parse_json(response.text)
-            return result
+            return _parse_json(response.text)
         except Exception as e:
             logger.error(f"Email generation failed: {e}")
             return {
-                "subject": f"[CRITICAL] Banking Cloud Alert: {incident.get('title', 'Unknown Incident')}",
-                "body": f"<h2>Critical Incident Detected</h2><p>{incident.get('description', '')}</p><h3>Solution</h3><p>{solution}</p>",
+                "subject": f"[{incident.get('priority', 'ALERT')}] Banking Cloud Alert: {incident.get('title', 'Unknown')}",
+                "body": f"<h2>Incident Detected</h2><p>{incident.get('description', '')}</p><h3>Solution</h3><p>{solution}</p>",
             }
 
 
-# Singleton instance
+# Singleton
 gemini_service = GeminiService()

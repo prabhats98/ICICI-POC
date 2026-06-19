@@ -11,6 +11,7 @@ const useAppStore = create((set) => ({
 
   // Pipeline status
   isPipelineRunning: false,
+  pipelineEnabled: true,
   currentNode: null,
   
   // WebSocket connection
@@ -35,6 +36,7 @@ const useAppStore = create((set) => ({
   setDashboard: (data) => set({ dashboard: data, isDashboardLoading: false }),
   setDashboardLoading: (loading) => set({ isDashboardLoading: loading }),
   setPipelineRunning: (running) => set({ isPipelineRunning: running }),
+  setPipelineEnabled: (enabled) => set({ pipelineEnabled: enabled }),
   setCurrentNode: (node) => set({ currentNode: node }),
   setWsConnected: (connected) => set({ wsConnected: connected }),
   setActivePage: (page) => set({ activePage: page }),

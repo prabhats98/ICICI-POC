@@ -1,9 +1,8 @@
 """
-Pipeline State - Shared state definition for the LangGraph agent pipeline.
-This TypedDict is passed between all agent nodes in the workflow.
+Pipeline State — Shared state definition for the 8-agent LangGraph pipeline.
 
-Data Flow:
-  raw_logs (DB) → Agent 1 [segregate] → cloud_logs (DB) → Agent 2 [analyze] → Agent 3+ [classify/act]
+Flow: Log Collector → Preprocessing → Classification → Priority
+      → Context → Resolution → Orchestrator → Notification
 """
 
 from typing import TypedDict, Any
@@ -19,42 +18,42 @@ class PipelineState(TypedDict, total=False):
     current_agent: str
     status: str  # "running", "completed", "failed"
 
-    # --- Agent 1: Log Extractor & Segregator outputs ---
-    segregated_log_ids: list[str]  # IDs of newly segregated CloudLog entries in PostgreSQL
-    total_logs_extracted: int
-    segregation_summary: dict[str, Any]  # {total, critical, error, warning, info, categories}
+    # --- Log Collector outputs ---
+    total_collected: int
+    per_source: dict[str, int]  # {"azure-front-door": 50, ...}
+    raw_log_ids: list[str]
 
-    # --- Agent 2: Anomaly Detector outputs ---
-    analysis_result: dict[str, Any]  # Full Gemini analysis response
+    # --- Preprocessing Engine outputs ---
+    total_preprocessed: int
+    level_counts: dict[str, int]
+    category_counts: dict[str, int]
+    cloud_log_ids: list[str]
+    duplicates_removed: int
+
+    # --- Classification Agent outputs ---
     issues_found: list[dict[str, Any]]
     has_issues: bool
-    logs_analyzed: int  # Number of cloud_logs actually sent to Gemini
-    level_distribution: dict[str, int]  # Level breakdown of analyzed logs
-    category_distribution: dict[str, int]  # Category breakdown of analyzed logs
+    logs_analyzed: int
 
-    # --- Agent 3: Priority Classifier outputs ---
+    # --- Priority Agent outputs ---
     classified_issues: list[dict[str, Any]]
-    high_priority_incidents: list[dict[str, Any]]
-    medium_priority_incidents: list[dict[str, Any]]
-    low_priority_incidents: list[dict[str, Any]]
+    p1_incidents: list[dict[str, Any]]
+    p2_incidents: list[dict[str, Any]]
+    p3_incidents: list[dict[str, Any]]
 
-    # --- Agent 5: Deep Code Analyzer outputs ---
-    deep_analysis_high: list[dict[str, Any]]
-    deep_analysis_medium: list[dict[str, Any]]
-    deep_analysis_low: list[dict[str, Any]]
+    # --- Context Agent outputs ---
+    context_enriched_incidents: list[dict[str, Any]]
 
-    # --- Agent 4a: High Priority Handler outputs ---
-    high_priority_solutions: list[dict[str, Any]]
+    # --- Resolution Agent outputs ---
+    resolutions: list[dict[str, Any]]
+
+    # --- Orchestrator Agent outputs ---
+    summary: dict[str, Any]
+    notifications_to_send: list[dict[str, Any]]
+
+    # --- Notification Agent outputs ---
     emails_sent: list[str]
-
-    # --- Agent 4b: Medium Priority Handler (Remediation Engine) outputs ---
-    medium_priority_solutions: list[dict[str, Any]]
-    medium_emails_sent: list[str]
-
-    # --- Agent 4c: Low Priority Handler outputs ---
-    low_priority_logged: int
-    low_priority_solutions: list[dict[str, Any]]
-    low_emails_sent: list[str]
+    email_failures: list[str]
 
     # --- Export ---
     export_paths: list[str]

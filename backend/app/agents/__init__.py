@@ -1,1 +1,1 @@
-# Banking Cloud Log Analyser - Agents Package
+"""Agents package."""

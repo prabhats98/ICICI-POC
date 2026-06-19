@@ -1,5 +1,6 @@
 /**
- * IncidentPanel Page - View and manage classified incidents.
+ * IncidentPanel Page — View and manage classified incidents with P1/P2/P3.
+ * Includes service filter, detailed expansion with full incident info.
  */
 
 import { useEffect, useState } from 'react';
@@ -13,11 +14,12 @@ export default function IncidentPanel() {
   const [loading, setLoading] = useState(true);
   const [priorityFilter, setPriorityFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [serviceFilter, setServiceFilter] = useState('');
   const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
     loadIncidents();
-  }, [page, priorityFilter, statusFilter]);
+  }, [page, priorityFilter, statusFilter, serviceFilter]);
 
   const loadIncidents = async () => {
     setLoading(true);
@@ -25,6 +27,7 @@ export default function IncidentPanel() {
       const params = { page, page_size: 10 };
       if (priorityFilter) params.priority = priorityFilter;
       if (statusFilter) params.status = statusFilter;
+      if (serviceFilter) params.source_service = serviceFilter;
 
       const res = await getIncidents(params);
       setIncidents(res.data.items || []);
@@ -39,17 +42,22 @@ export default function IncidentPanel() {
 
   const handleResolve = async (id) => {
     try {
-      await updateIncident(id, { status: 'RESOLVED' });
+      await updateIncident(id, { status: 'RESOLVED', resolved_by: 'manual' });
       loadIncidents();
     } catch (err) {
       console.error('Resolve error:', err);
     }
   };
 
-  const formatDate = (d) => d ? new Date(d).toLocaleString() : 'N/A';
+  const formatDate = (d) => d && d !== 'None' ? new Date(d).toLocaleString() : 'N/A';
 
   const handleExport = (format) => {
     window.open(`http://localhost:8000/api/export/incidents?format=${format}`, '_blank');
+  };
+
+  const priorityBadge = (p) => {
+    const map = { P1: 'high', P2: 'medium', P3: 'low' };
+    return map[p] || 'low';
   };
 
   return (
@@ -67,9 +75,9 @@ export default function IncidentPanel() {
       <div className="filter-bar animate-in animate-in-delay-1">
         <select className="filter-select" value={priorityFilter} onChange={(e) => { setPriorityFilter(e.target.value); setPage(1); }}>
           <option value="">All Priorities</option>
-          <option value="HIGH">🔴 High</option>
-          <option value="MEDIUM">🟡 Medium</option>
-          <option value="LOW">🟢 Low</option>
+          <option value="P1">🔴 P1 Critical</option>
+          <option value="P2">🟡 P2 Warning</option>
+          <option value="P3">🟢 P3 Info</option>
         </select>
         <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
           <option value="">All Statuses</option>
@@ -78,6 +86,13 @@ export default function IncidentPanel() {
           <option value="ACKNOWLEDGED">Acknowledged</option>
           <option value="RESOLVED">Resolved</option>
           <option value="CLOSED">Closed</option>
+        </select>
+        <select className="filter-select" value={serviceFilter} onChange={(e) => { setServiceFilter(e.target.value); setPage(1); }}>
+          <option value="">All Services</option>
+          <option value="Azure Front Door">Azure Front Door</option>
+          <option value="Azure Application Gateway">App Gateway</option>
+          <option value="Azure API Management">API Management</option>
+          <option value="Azure Virtual Machine">VM</option>
         </select>
         <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-tertiary)' }}>
           {total} incident{total !== 1 ? 's' : ''}
@@ -108,7 +123,7 @@ export default function IncidentPanel() {
               <div className="incident-card-header">
                 <span className="incident-card-title">{inc.title}</span>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className={`priority-badge ${inc.priority.toLowerCase()}`}>{inc.priority}</span>
+                  <span className={`priority-badge ${priorityBadge(inc.priority)}`}>{inc.priority}</span>
                   <span className="priority-badge" style={{
                     background: 'var(--bg-glass)',
                     color: 'var(--text-secondary)',
@@ -124,9 +139,11 @@ export default function IncidentPanel() {
               </div>
 
               <div className="incident-card-meta">
+                <span>🏢 {inc.source_service || 'N/A'}</span>
                 <span>📁 {inc.category || 'N/A'}</span>
                 <span>🕐 {formatDate(inc.created_at)}</span>
-                {inc.email_sent && <span>📧 Email sent {formatDate(inc.email_sent_at)}</span>}
+                {inc.email_sent && <span>📧 Email sent</span>}
+                {inc.historical_match_count > 0 && <span>📚 {inc.historical_match_count} past matches</span>}
               </div>
 
               {/* Expanded Details */}
@@ -140,13 +157,13 @@ export default function IncidentPanel() {
                 }}>
                   {inc.ai_analysis && (
                     <div style={{ marginBottom: 16 }}>
-                      <h4 style={{ fontSize: 13, color: 'var(--accent-indigo-light)', marginBottom: 8 }}>🤖 AI Analysis</h4>
+                      <h4 style={{ fontSize: 13, color: 'var(--accent-indigo-light)', marginBottom: 8 }}>🤖 AI Classification</h4>
                       <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{inc.ai_analysis}</p>
                     </div>
                   )}
                   {inc.ai_solution && (
                     <div style={{ marginBottom: 16 }}>
-                      <h4 style={{ fontSize: 13, color: 'var(--accent-emerald)', marginBottom: 8 }}>💡 AI Solution</h4>
+                      <h4 style={{ fontSize: 13, color: 'var(--accent-emerald)', marginBottom: 8 }}>💡 AI Resolution</h4>
                       <pre style={{
                         fontSize: 12,
                         color: 'var(--text-secondary)',
@@ -161,8 +178,20 @@ export default function IncidentPanel() {
                       </pre>
                     </div>
                   )}
+                  {inc.resolution_runbook && inc.resolution_runbook !== inc.ai_solution && (
+                    <div style={{ marginBottom: 16 }}>
+                      <h4 style={{ fontSize: 13, color: 'var(--accent-amber)', marginBottom: 8 }}>📖 Runbook</h4>
+                      <pre style={{
+                        fontSize: 12, color: 'var(--text-secondary)',
+                        fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap', lineHeight: 1.7,
+                        background: 'var(--bg-tertiary)', padding: 12, borderRadius: 'var(--radius-sm)',
+                      }}>
+                        {inc.resolution_runbook}
+                      </pre>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {inc.status !== 'RESOLVED' && (
+                    {inc.status !== 'RESOLVED' && inc.status !== 'CLOSED' && (
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={(e) => { e.stopPropagation(); handleResolve(inc.id); }}

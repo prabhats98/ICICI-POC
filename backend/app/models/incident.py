@@ -1,5 +1,5 @@
 """
-Incident Model - Represents classified and prioritized incidents detected by agents.
+Incident Model — Classified and prioritized incidents with P1/P2/P3 levels.
 """
 
 import uuid
@@ -11,9 +11,9 @@ from sqlalchemy import (
     Column,
     DateTime,
     Enum,
+    Integer,
     String,
     Text,
-    Integer,
     Index,
 )
 from sqlalchemy import JSON
@@ -23,9 +23,9 @@ from app.database import Base
 
 class PriorityLevel(str, enum.Enum):
     """Incident priority levels."""
-    HIGH = "HIGH"
-    MEDIUM = "MEDIUM"
-    LOW = "LOW"
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
 
 
 class IncidentStatus(str, enum.Enum):
@@ -43,40 +43,48 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    title = Column(String(500), nullable=False)  # AI-generated incident title
-    description = Column(Text, nullable=False)  # Detailed description
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=False)
     priority = Column(
         Enum(PriorityLevel, name="priority_level"),
         nullable=False,
         index=True,
     )
-    category = Column(String(255), nullable=True)  # e.g., "Auth Failure", "Resource Exhaustion"
+    category = Column(String(255), nullable=True)
     status = Column(
         Enum(IncidentStatus, name="incident_status"),
         default=IncidentStatus.OPEN,
         nullable=False,
         index=True,
     )
+    source_service = Column(String(255), nullable=True)  # azure-front-door, azure-app-gateway, etc.
 
     # Related log IDs
-    log_ids = Column(JSON, nullable=True)  # List of log UUIDs as JSON
+    log_ids = Column(JSON, nullable=True)
     log_count = Column(Integer, default=0)
 
     # AI Analysis
-    ai_analysis = Column(Text, nullable=True)  # Gemini's analysis
-    ai_solution = Column(Text, nullable=True)  # Gemini's proposed solution
-    ai_model_used = Column(String(100), nullable=True)  # Model version used
+    ai_analysis = Column(Text, nullable=True)
+    ai_solution = Column(Text, nullable=True)
+    ai_model_used = Column(String(100), nullable=True)
+    resolution_runbook = Column(Text, nullable=True)
+
+    # Historical context
+    historical_match_count = Column(Integer, default=0)
+    historical_match_ids = Column(JSON, nullable=True)
 
     # Email tracking
     email_sent = Column(Boolean, default=False)
     email_sent_at = Column(DateTime(timezone=True), nullable=True)
     email_recipient = Column(String(255), nullable=True)
 
-    # Agent run reference
+    # Resolution tracking
     agent_run_id = Column(String(36), nullable=True)
+    resolved_by = Column(String(100), nullable=True)  # "auto" or "manual"
+    resolution_duration_minutes = Column(Integer, nullable=True)
 
     # Metadata
-    raw_data = Column(JSON, nullable=True)  # Extra context
+    raw_data = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
@@ -84,6 +92,7 @@ class Incident(Base):
     __table_args__ = (
         Index("ix_incidents_priority_status", "priority", "status"),
         Index("ix_incidents_created_at", "created_at"),
+        Index("ix_incidents_source_service", "source_service"),
     )
 
     def __repr__(self) -> str:

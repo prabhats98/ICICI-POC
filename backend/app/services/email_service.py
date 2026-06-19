@@ -1,6 +1,6 @@
 """
-Email Service - Sends alert emails for high-priority incidents via SMTP.
-Uses demo credentials by default; replace in .env for production.
+Email Service — Sends alert emails via SMTP or Azure Communication Services.
+Channel selection is driven by NOTIFICATION_CHANNEL in .env.
 """
 
 import logging
@@ -16,7 +16,7 @@ settings = get_settings()
 
 
 class EmailService:
-    """Async email service for sending priority alert emails."""
+    """Unified email service supporting SMTP and Azure Communication Services."""
 
     def __init__(self):
         self.host = settings.smtp_host
@@ -33,28 +33,36 @@ class EmailService:
         to_email: str | None = None,
     ) -> bool:
         """
-        Send an HTML alert email to the production manager.
-
-        Args:
-            subject: Email subject line
-            html_body: HTML formatted email body
-            to_email: Recipient email (defaults to SMTP_TO_EMAIL from .env)
-
-        Returns:
-            True if email sent successfully, False otherwise
+        Send an alert email using the configured channel.
+        Tries Azure Communication Services first if configured, falls back to SMTP.
         """
         recipient = to_email or self.default_to_email
+        channel = settings.notification_channel
 
-        # Build the email message
+        # Try Azure Communication Services
+        if channel == "azure_communication_service":
+            try:
+                from app.services.azure_notification_service import azure_notification_service
+                sent = await azure_notification_service.send_email(recipient, subject, html_body)
+                if sent:
+                    return True
+                logger.warning("ACS failed, falling back to SMTP")
+            except Exception as e:
+                logger.warning(f"ACS unavailable ({e}), falling back to SMTP")
+
+        # SMTP (primary or fallback)
+        return await self._send_smtp(recipient, subject, html_body)
+
+    async def _send_smtp(self, to_email: str, subject: str, html_body: str) -> bool:
+        """Send email via SMTP."""
         message = MIMEMultipart("alternative")
         message["From"] = self.from_email
-        message["To"] = recipient
+        message["To"] = to_email
         message["Subject"] = subject
-        message["X-Priority"] = "1"  # High priority
-        message["X-Mailer"] = "Banking Cloud Log Analyser"
+        message["X-Priority"] = "1"
+        message["X-Mailer"] = "Azure Incident Log Pipeline"
 
-        # Plain text fallback
-        plain_text = f"CRITICAL ALERT\n\n{subject}\n\nPlease view this email in an HTML-capable client for full details."
+        plain_text = f"ALERT\n\n{subject}\n\nPlease view this email in an HTML-capable client."
         message.attach(MIMEText(plain_text, "plain"))
         message.attach(MIMEText(html_body, "html"))
 
@@ -68,19 +76,18 @@ class EmailService:
                 use_tls=False,
                 start_tls=True,
             )
-            logger.info(f"Alert email sent to {recipient}: {subject}")
+            logger.info(f"SMTP email sent to {to_email}: {subject}")
             return True
         except aiosmtplib.SMTPException as e:
-            logger.error(f"SMTP error sending email to {recipient}: {e}")
+            logger.error(f"SMTP error sending to {to_email}: {e}")
             return False
         except Exception as e:
-            # Demo mode: log but don't crash when using demo credentials
             logger.warning(
-                f"Email sending failed (using demo credentials?): {e}. "
-                f"Email would have been sent to {recipient} with subject: {subject}"
+                f"Email sending failed: {e}. "
+                f"Would have sent to {to_email} with subject: {subject}"
             )
             return False
 
 
-# Singleton instance
+# Singleton
 email_service = EmailService()

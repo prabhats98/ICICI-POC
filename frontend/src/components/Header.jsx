@@ -17,7 +17,7 @@ const PAGE_TITLES = {
 
 export default function Header() {
   const location = useLocation();
-  const { isPipelineRunning, setPipelineRunning } = useAppStore();
+  const { isPipelineRunning, setPipelineRunning, pipelineEnabled } = useAppStore();
   const [triggering, setTriggering] = useState(false);
   const title = PAGE_TITLES[location.pathname] || 'Dashboard';
 
@@ -47,6 +47,15 @@ export default function Header() {
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--accent-blue)' }}>
             <span className="status-dot running"></span>
             Pipeline running...
+          </span>
+        )}
+        {!isPipelineRunning && (
+          <span style={{
+            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+            background: pipelineEnabled ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+            color: pipelineEnabled ? '#10b981' : '#ef4444',
+          }}>
+            {pipelineEnabled ? 'PIPELINE ON' : 'PIPELINE OFF'}
           </span>
         )}
       </div>
