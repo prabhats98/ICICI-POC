@@ -26,7 +26,7 @@ class AgentRunResponse(BaseModel):
     emails_sent: int
     error_message: Optional[str]
     trigger_type: str
-    metadata: Optional[dict[str, Any]]
+    run_metadata: Optional[dict[str, Any]]
 
     model_config = {"from_attributes": True}
 
