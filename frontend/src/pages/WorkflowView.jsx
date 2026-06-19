@@ -1,10 +1,13 @@
 /**
  * WorkflowView Page - React Flow visualization of the agent pipeline.
- * Includes deep code analysis nodes, Solution Architect naming, node config modal,
- * real-time I/O data panels on nodes, and a pipeline summary modal.
+ * Features:
+ *   - Live pipeline progress bar with step counter & timer
+ *   - Animated node status transitions (idle → running → completed)
+ *   - Real-time node output result cards
+ *   - Pipeline summary modal on completion
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -20,40 +23,145 @@ import useAppStore from '../store/useAppStore';
 import { getWorkflowState, triggerPipeline } from '../services/api';
 import NodeConfigModal from '../components/NodeConfigModal';
 
-// --- Node I/O Panel (rendered inside each node) ---
-function NodeIOPanel({ nodeId }) {
+// --- Node order for progress tracking ---
+const PIPELINE_STEPS = [
+  'log_extractor',
+  'anomaly_detector',
+  'priority_classifier',
+  'deep_code_analyzer_high',
+  'deep_code_analyzer_medium',
+  'deep_code_analyzer_low',
+  'high_priority_handler',
+  'medium_priority_handler',
+  'low_priority_handler',
+];
+
+const STEP_LABELS = {
+  log_extractor: 'Extracting Logs',
+  anomaly_detector: 'Detecting Anomalies',
+  priority_classifier: 'Classifying Priority',
+  deep_code_analyzer_high: 'Deep Analysis (HIGH)',
+  deep_code_analyzer_medium: 'Deep Analysis (MEDIUM)',
+  deep_code_analyzer_low: 'Deep Analysis (LOW)',
+  high_priority_handler: 'Emergency Response',
+  medium_priority_handler: 'Solution Architect',
+  low_priority_handler: 'Advisory Report',
+};
+
+// --- Pipeline Progress Banner ---
+function PipelineProgressBanner() {
+  const { isPipelineRunning, currentNode, nodeData } = useAppStore();
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef(null);
+  const startRef = useRef(null);
+
+  // Count completed steps
+  const completedSteps = PIPELINE_STEPS.filter(
+    (id) => nodeData[id]?.completedAt
+  ).length;
+  const currentIdx = PIPELINE_STEPS.indexOf(currentNode);
+  const totalSteps = PIPELINE_STEPS.length;
+  const progressPercent = isPipelineRunning
+    ? Math.max(((completedSteps) / totalSteps) * 100, 5)
+    : completedSteps > 0
+    ? 100
+    : 0;
+
+  useEffect(() => {
+    if (isPipelineRunning) {
+      startRef.current = Date.now();
+      setElapsed(0);
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isPipelineRunning]);
+
+  if (!isPipelineRunning && completedSteps === 0) return null;
+
+  const formatTime = (s) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+  };
+
+  return (
+    <div className={`pipeline-banner ${isPipelineRunning ? 'running' : 'done'}`}>
+      <div className="pipeline-banner-content">
+        <div className="pipeline-banner-left">
+          {isPipelineRunning ? (
+            <>
+              <span className="pipeline-banner-pulse" />
+              <span className="pipeline-banner-label">Pipeline Running</span>
+              <span className="pipeline-banner-step">
+                {currentNode ? STEP_LABELS[currentNode] || currentNode : 'Starting...'}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="pipeline-banner-check">✓</span>
+              <span className="pipeline-banner-label">Pipeline Complete</span>
+            </>
+          )}
+        </div>
+        <div className="pipeline-banner-right">
+          <span className="pipeline-banner-counter">
+            {completedSteps}/{totalSteps} steps
+          </span>
+          <span className="pipeline-banner-timer">
+            ⏱ {formatTime(elapsed)}
+          </span>
+        </div>
+      </div>
+      <div className="pipeline-banner-bar-track">
+        <div
+          className="pipeline-banner-bar-fill"
+          style={{ width: `${progressPercent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// --- Node Output Result Card (attached to right of node) ---
+function NodeResultCard({ nodeId }) {
   const nodeData = useAppStore((s) => s.nodeData[nodeId]);
   if (!nodeData) return null;
 
-  const hasInput = nodeData.input && nodeData.input.description;
   const hasOutput = nodeData.output && nodeData.output.description;
+  const hasInput = nodeData.input && nodeData.input.description;
+  const isRunning = !nodeData.completedAt && nodeData.startedAt;
+  const isCompleted = !!nodeData.completedAt;
 
-  if (!hasInput && !hasOutput) return null;
+  if (!hasInput && !hasOutput && !isRunning) return null;
 
   return (
-    <div className="node-io-panel">
-      {hasInput && (
-        <div className="node-io-item node-io-input">
-          <span className="node-io-icon">📥</span>
-          <span className="node-io-text">{nodeData.input.description}</span>
+    <div className={`node-result-card ${isCompleted ? 'completed' : ''} ${isRunning ? 'running' : ''}`}>
+      {isRunning && !isCompleted && (
+        <div className="node-result-running">
+          <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+          <span>{hasInput ? nodeData.input.description : 'Processing...'}</span>
         </div>
       )}
-      {hasOutput && (
-        <div className="node-io-item node-io-output">
-          <span className="node-io-icon">📤</span>
-          <span className="node-io-text">{nodeData.output.description}</span>
-        </div>
-      )}
-      {nodeData.duration != null && (
-        <div className="node-io-duration">
-          ⏱ {nodeData.duration}s
+      {isCompleted && hasOutput && (
+        <div className="node-result-output">
+          <span className="node-result-icon">📤</span>
+          <span className="node-result-text">{nodeData.output.description}</span>
+          {nodeData.duration != null && (
+            <span className="node-result-duration">{nodeData.duration}s</span>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// Custom node component
+// --- Custom Node Component ---
 function WorkflowNode({ data }) {
   const statusClass = data.status || 'idle';
   const extraClass = data.extraClass || '';
@@ -69,26 +177,27 @@ function WorkflowNode({ data }) {
         </div>
         <span className="workflow-node-title">{data.label}</span>
         {data.status === 'running' && (
-          <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2, marginLeft: 'auto' }}></span>
+          <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2, marginLeft: 'auto' }} />
         )}
         {data.status === 'completed' && (
-          <span style={{ marginLeft: 'auto', color: 'var(--accent-emerald)', fontSize: 14 }}>✓</span>
+          <span className="node-done-badge">✓</span>
         )}
       </div>
       <div className="workflow-node-subtitle">{data.subtitle}</div>
-      <NodeIOPanel nodeId={data.nodeId} />
+      <NodeResultCard nodeId={data.nodeId} />
       <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
     </div>
   );
 }
 
-// Decision node (diamond shape via CSS)
+// --- Decision Node (diamond-style) ---
 function DecisionNode({ data }) {
   const statusClass = data.status || 'idle';
   return (
     <div className={`workflow-node ${statusClass}`} style={{
       transform: 'rotate(0deg)',
-      borderColor: 'var(--accent-amber)',
+      borderColor: data.status === 'running' ? 'var(--status-running)' :
+                   data.status === 'completed' ? 'var(--status-success)' : 'var(--accent-amber)',
       borderStyle: 'dashed',
       borderWidth: 2,
     }}>
@@ -99,11 +208,14 @@ function DecisionNode({ data }) {
         </div>
         <span className="workflow-node-title">{data.label}</span>
         {data.status === 'running' && (
-          <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2, marginLeft: 'auto' }}></span>
+          <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2, marginLeft: 'auto' }} />
+        )}
+        {data.status === 'completed' && (
+          <span className="node-done-badge">✓</span>
         )}
       </div>
       <div className="workflow-node-subtitle">{data.subtitle}</div>
-      <NodeIOPanel nodeId={data.nodeId} />
+      <NodeResultCard nodeId={data.nodeId} />
       <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
     </div>
   );
@@ -135,7 +247,7 @@ const initialNodes = [
     position: { x: 350, y: 120 },
     data: {
       label: 'Extract Monitoring Data',
-      subtitle: 'Agent 1: Scheduled DB extraction',
+      subtitle: 'Agent 1: Firestore → PostgreSQL',
       icon: '📊',
       iconBg: 'rgba(16,185,129,0.2)',
       iconColor: '#10b981',
@@ -168,7 +280,7 @@ const initialNodes = [
       nodeId: 'priority_classifier',
     },
   },
-  // --- Deep Code Analysis Nodes (Purple/Violet) ---
+  // --- Deep Code Analysis Nodes ---
   {
     id: 'deep_code_analyzer_high',
     type: 'workflowNode',
@@ -214,7 +326,7 @@ const initialNodes = [
       nodeId: 'deep_code_analyzer_low',
     },
   },
-  // --- Solution Architect + Email Nodes ---
+  // --- Handler Nodes ---
   {
     id: 'high_priority_handler',
     type: 'workflowNode',
@@ -303,28 +415,21 @@ const initialNodes = [
 ];
 
 const initialEdges = [
-  // Start → Extract → Detect → Classify
   { id: 'e-start-extract', source: 'start', target: 'log_extractor', animated: true, style: { stroke: 'var(--accent-indigo)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-indigo)' } },
   { id: 'e-extract-detect', source: 'log_extractor', target: 'anomaly_detector', animated: true, style: { stroke: 'var(--accent-emerald)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-emerald)' } },
   { id: 'e-detect-classify', source: 'anomaly_detector', target: 'priority_classifier', animated: true, style: { stroke: 'var(--accent-amber)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-amber)' } },
-
-  // Classify → Deep Code Analysis
   { id: 'e-classify-dca-high', source: 'priority_classifier', target: 'deep_code_analyzer_high', animated: true, label: 'HIGH', style: { stroke: '#ef4444' }, labelStyle: { fill: '#ef4444', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#ef4444' } },
   { id: 'e-classify-dca-medium', source: 'priority_classifier', target: 'deep_code_analyzer_medium', animated: true, label: 'MEDIUM', style: { stroke: '#f59e0b' }, labelStyle: { fill: '#f59e0b', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b' } },
   { id: 'e-classify-dca-low', source: 'priority_classifier', target: 'deep_code_analyzer_low', animated: true, label: 'LOW', style: { stroke: '#10b981' }, labelStyle: { fill: '#10b981', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#10b981' } },
-
-  // Deep Code Analysis → Solution Architect + Email
   { id: 'e-dca-high-handler', source: 'deep_code_analyzer_high', target: 'high_priority_handler', animated: true, style: { stroke: '#8b5cf6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } },
   { id: 'e-dca-medium-handler', source: 'deep_code_analyzer_medium', target: 'medium_priority_handler', animated: true, style: { stroke: '#8b5cf6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } },
   { id: 'e-dca-low-handler', source: 'deep_code_analyzer_low', target: 'low_priority_handler', animated: true, style: { stroke: '#8b5cf6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } },
-
-  // Solution Architect → End
   { id: 'e-high-end', source: 'high_priority_handler', target: 'end_high', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
   { id: 'e-medium-end', source: 'medium_priority_handler', target: 'end_medium', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
   { id: 'e-low-end', source: 'low_priority_handler', target: 'end_low', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
 ];
 
-// --- Node metadata for summary display ---
+// --- Node metadata for summary ---
 const NODE_META = {
   log_extractor: { label: 'Extract Monitoring Data', icon: '📊', color: '#10b981' },
   anomaly_detector: { label: 'Detect Spikes & Anomalies', icon: '🔍', color: '#f43f5e' },
@@ -351,7 +456,6 @@ function PipelineSummaryModal() {
   const totalSolutions = (s.solutions?.high || 0) + (s.solutions?.medium || 0) + (s.solutions?.low || 0);
   const totalAnalyses = (s.deep_analyses?.high || 0) + (s.deep_analyses?.medium || 0) + (s.deep_analyses?.low || 0);
 
-  // Build per-node timeline from nodeData
   const nodeTimeline = Object.entries(nodeData)
     .filter(([id]) => NODE_META[id])
     .sort((a, b) => (a[1].startedAt || 0) - (b[1].startedAt || 0))
@@ -366,7 +470,6 @@ function PipelineSummaryModal() {
   return (
     <div className="psm-overlay" onClick={() => setShowSummaryModal(false)}>
       <div className="psm-modal" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div className="psm-header">
           <div className="psm-header-info">
             <div className="psm-header-row">
@@ -379,9 +482,7 @@ function PipelineSummaryModal() {
           <button className="psm-close" onClick={() => setShowSummaryModal(false)}>✕</button>
         </div>
 
-        {/* Body */}
         <div className="psm-body">
-          {/* Aggregated Stats */}
           <div className="psm-stats-grid">
             <div className="psm-stat">
               <div className="psm-stat-value">{s.logs_processed || 0}</div>
@@ -409,7 +510,6 @@ function PipelineSummaryModal() {
             </div>
           </div>
 
-          {/* Priority Breakdown */}
           <div className="psm-section">
             <h3 className="psm-section-title">Priority Breakdown</h3>
             <div className="psm-priority-row">
@@ -437,7 +537,6 @@ function PipelineSummaryModal() {
             </div>
           </div>
 
-          {/* Node Timeline */}
           {nodeTimeline.length > 0 && (
             <div className="psm-section">
               <h3 className="psm-section-title">Node Execution Timeline</h3>
@@ -473,7 +572,6 @@ function PipelineSummaryModal() {
             </div>
           )}
 
-          {/* Errors */}
           {s.errors && s.errors.length > 0 && (
             <div className="psm-section">
               <h3 className="psm-section-title" style={{ color: 'var(--priority-high)' }}>⚠ Errors</h3>
@@ -486,7 +584,6 @@ function PipelineSummaryModal() {
           )}
         </div>
 
-        {/* Footer */}
         <div className="psm-footer">
           <button className="btn btn-secondary btn-sm" onClick={() => setShowSummaryModal(false)}>
             Dismiss
@@ -501,15 +598,12 @@ function PipelineSummaryModal() {
 export default function WorkflowView() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const { currentNode, isPipelineRunning } = useAppStore();
+  const { currentNode, isPipelineRunning, nodeData } = useAppStore();
 
-  // Node config modal state
   const [selectedNode, setSelectedNode] = useState(null);
 
-  // Update node statuses when pipeline runs
+  // Update node statuses based on WebSocket events
   useEffect(() => {
-    if (!isPipelineRunning && !currentNode) return;
-
     const nodeOrder = [
       'start', 'log_extractor', 'anomaly_detector', 'priority_classifier',
       'deep_code_analyzer_high', 'deep_code_analyzer_medium', 'deep_code_analyzer_low',
@@ -523,16 +617,43 @@ export default function WorkflowView() {
         let status = 'idle';
 
         if (isPipelineRunning) {
-          if (idx < currentIdx) status = 'completed';
-          else if (idx === currentIdx) status = 'running';
-        } else {
-          status = 'idle';
+          // Check if this specific node has completed (from nodeData)
+          if (nodeData[node.id]?.completedAt) {
+            status = 'completed';
+          } else if (idx === currentIdx) {
+            status = 'running';
+          } else if (idx < currentIdx) {
+            status = 'completed';
+          }
+        } else if (nodeData[node.id]?.completedAt) {
+          // Pipeline done, but keep completed status
+          status = 'completed';
         }
 
         return { ...node, data: { ...node.data, status } };
       })
     );
-  }, [currentNode, isPipelineRunning, setNodes]);
+
+    // Highlight active edges
+    setEdges((eds) =>
+      eds.map((edge) => {
+        const sourceIdx = nodeOrder.indexOf(edge.source);
+        const targetIdx = nodeOrder.indexOf(edge.target);
+        const isActive = isPipelineRunning && sourceIdx >= 0 && sourceIdx < currentIdx;
+        const isCurrent = isPipelineRunning && targetIdx === currentIdx;
+
+        return {
+          ...edge,
+          animated: true,
+          style: {
+            ...edge.style,
+            strokeWidth: isCurrent ? 3 : isActive ? 2.5 : 1.5,
+            opacity: isPipelineRunning ? (isActive || isCurrent ? 1 : 0.3) : 0.8,
+          },
+        };
+      })
+    );
+  }, [currentNode, isPipelineRunning, nodeData, setNodes, setEdges]);
 
   // Polling workflow state
   useEffect(() => {
@@ -560,7 +681,6 @@ export default function WorkflowView() {
     return () => clearInterval(interval);
   }, [setNodes]);
 
-  // Handle node click → open config modal
   const onNodeClick = useCallback((_event, node) => {
     setSelectedNode({
       id: node.id,
@@ -570,6 +690,9 @@ export default function WorkflowView() {
 
   return (
     <div className="page-content" style={{ padding: 0, paddingTop: 'var(--header-height)' }}>
+      {/* Pipeline Progress Banner */}
+      <PipelineProgressBanner />
+
       <div style={{ height: 'calc(100vh - var(--header-height))', width: '100%' }}>
         <ReactFlow
           nodes={nodes}
@@ -590,7 +713,6 @@ export default function WorkflowView() {
         </ReactFlow>
       </div>
 
-      {/* Node Config Modal */}
       {selectedNode && (
         <NodeConfigModal
           nodeId={selectedNode.id}
@@ -599,7 +721,6 @@ export default function WorkflowView() {
         />
       )}
 
-      {/* Pipeline Summary Modal */}
       <PipelineSummaryModal />
     </div>
   );

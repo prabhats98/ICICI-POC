@@ -153,7 +153,7 @@ def _segregate_raw_log(raw_log: RawLog, run_id: str) -> CloudLog:
             timestamp = datetime.utcnow()
 
     return CloudLog(
-        id=uuid.uuid4(),
+        id=str(uuid.uuid4()),
         timestamp=timestamp,
         level=level,
         source=source,
@@ -170,11 +170,77 @@ def _segregate_raw_log(raw_log: RawLog, run_id: str) -> CloudLog:
     )
 
 
+async def _ingest_from_firestore() -> int:
+    """
+    Fetch unprocessed logs from Firestore and insert them into PostgreSQL raw_logs.
+
+    Returns the number of documents ingested.
+    """
+    from app.services.firestore_service import firestore_service
+
+    try:
+        # Fetch unprocessed docs from Firestore
+        firestore_docs = firestore_service.fetch_unprocessed_logs(batch_size=200)
+
+        if not firestore_docs:
+            logger.info("Agent 1 [Firestore Ingest]: No new documents in Firestore")
+            return 0
+
+        logger.info(
+            f"Agent 1 [Firestore Ingest]: Ingesting {len(firestore_docs)} "
+            f"documents from Firestore into raw_logs..."
+        )
+
+        # Insert into PostgreSQL raw_logs table
+        ingested_doc_ids = []
+        async with async_session() as session:
+            for doc in firestore_docs:
+                payload = doc["payload"]
+                # Remove the is_ingested tracking field from the payload
+                payload_clean = {
+                    k: v for k, v in payload.items() if k != "is_ingested"
+                }
+
+                # Build a text summary for keyword-based detection
+                message = (
+                    payload_clean.get("properties", {}).get("message", "")
+                    or payload_clean.get("operationName", "")
+                    or payload_clean.get("resultType", "")
+                )
+
+                raw_log = RawLog(
+                    id=str(uuid.uuid4()),
+                    ingested_at=datetime.utcnow(),
+                    source_system="firestore",
+                    raw_payload=payload_clean,
+                    raw_text=message[:5000] if message else None,
+                    is_segregated=False,
+                )
+                session.add(raw_log)
+                ingested_doc_ids.append(doc["firestore_doc_id"])
+
+            await session.commit()
+
+        # Mark Firestore docs as ingested so they won't be fetched again
+        firestore_service.mark_as_ingested(ingested_doc_ids)
+
+        logger.info(
+            f"Agent 1 [Firestore Ingest]: Successfully ingested "
+            f"{len(ingested_doc_ids)} documents into raw_logs"
+        )
+        return len(ingested_doc_ids)
+
+    except Exception as e:
+        logger.error(f"Agent 1 [Firestore Ingest] failed: {e}")
+        return 0
+
+
 async def log_extractor_node(state: PipelineState) -> dict[str, Any]:
     """
-    LangGraph Node: Pull raw logs → Segregate → Store in PostgreSQL.
+    LangGraph Node: Ingest from Firestore → Segregate → Store in PostgreSQL.
 
     Steps:
+    0. Fetch new logs from Firestore → insert into raw_logs table
     1. Query un-segregated entries from the `raw_logs` table
     2. Segregate each log: detect level, source, category
     3. Store structured entries into the `cloud_logs` table
@@ -184,9 +250,16 @@ async def log_extractor_node(state: PipelineState) -> dict[str, Any]:
     run_id = state.get("run_id", "")
     logger.info("Agent 1 [Log Extractor]: Starting raw log extraction & segregation...")
 
+    # Step 0: Ingest new logs from Firestore into raw_logs
+    firestore_ingested = await _ingest_from_firestore()
+    if firestore_ingested > 0:
+        logger.info(
+            f"Agent 1 [Log Extractor]: Ingested {firestore_ingested} new logs from Firestore"
+        )
+
     try:
         async with async_session() as session:
-            # Step 1: Fetch un-segregated raw logs
+            # Step 1: Fetch un-segregated raw logs (includes newly ingested Firestore data)
             query = (
                 select(RawLog)
                 .where(RawLog.is_segregated == False)

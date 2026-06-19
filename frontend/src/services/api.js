@@ -27,6 +27,7 @@ export const updateIncident = (id, data) => api.patch(`/api/incidents/${id}`, da
 
 // --- Agents ---
 export const triggerPipeline = (data = {}) => api.post('/api/agents/run', { trigger_type: 'manual', ...data });
+export const resetAndRunPipeline = () => api.post('/api/agents/reset-and-run');
 export const getAgentStatus = () => api.get('/api/agents/status');
 export const getAgentHistory = (params) => api.get('/api/agents/history', { params });
 

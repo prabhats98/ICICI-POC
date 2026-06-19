@@ -4,7 +4,7 @@
 
 import { useLocation } from 'react-router-dom';
 import useAppStore from '../store/useAppStore';
-import { triggerPipeline } from '../services/api';
+import { triggerPipeline, resetAndRunPipeline } from '../services/api';
 import { useState } from 'react';
 
 const PAGE_TITLES = {
@@ -17,16 +17,23 @@ const PAGE_TITLES = {
 
 export default function Header() {
   const location = useLocation();
-  const { isPipelineRunning } = useAppStore();
+  const { isPipelineRunning, setPipelineRunning } = useAppStore();
   const [triggering, setTriggering] = useState(false);
   const title = PAGE_TITLES[location.pathname] || 'Dashboard';
 
-  const handleTriggerPipeline = async () => {
+  const handleTriggerPipeline = async (resetFirst = false) => {
+    if (isPipelineRunning || triggering) return;
     setTriggering(true);
+    setPipelineRunning(true);
     try {
-      await triggerPipeline();
+      if (resetFirst) {
+        await resetAndRunPipeline();
+      } else {
+        await triggerPipeline();
+      }
     } catch (err) {
       console.error('Failed to trigger pipeline:', err);
+      setPipelineRunning(false);
     } finally {
       setTriggering(false);
     }
@@ -46,8 +53,20 @@ export default function Header() {
       <div className="header-right">
         <input className="header-search" type="text" placeholder="Search logs, incidents..." />
         <button
+          className="btn btn-secondary"
+          onClick={() => handleTriggerPipeline(true)}
+          disabled={triggering || isPipelineRunning}
+          title="Reset all processing flags and re-run pipeline from scratch"
+        >
+          {isPipelineRunning ? (
+            <><span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }}></span> Resetting</>
+          ) : (
+            <>🔄 Reset & Re-run</>
+          )}
+        </button>
+        <button
           className="btn btn-primary"
-          onClick={handleTriggerPipeline}
+          onClick={() => handleTriggerPipeline(false)}
           disabled={triggering || isPipelineRunning}
         >
           {isPipelineRunning ? (

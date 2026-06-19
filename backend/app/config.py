@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/banking_log_analyser"
     database_sync_url: str = "postgresql://postgres:postgres@localhost:5432/banking_log_analyser"
 
+    # --- Firestore ---
+    firestore_collection: str = "azure_logs_raw"
+    firestore_service_account: str = "service-account.json"
+
     # --- GCP / Vertex AI ---
     google_application_credentials: str = "../service-account-key.json"
     gcp_project_id: str = "gen-ai-poc-onboarding"

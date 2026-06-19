@@ -57,7 +57,7 @@ async def priority_classifier_node(state: PipelineState) -> dict[str, Any]:
 
                 # Create Incident record in DB
                 incident = Incident(
-                    id=uuid.uuid4(),
+                    id=str(uuid.uuid4()),
                     title=item.get("original_title", "Unknown Issue"),
                     description=item.get("enriched_description", item.get("description", "")),
                     priority=priority,
