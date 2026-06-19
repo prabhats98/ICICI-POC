@@ -43,6 +43,41 @@ async def trigger_pipeline(
     )
 
 
+@router.post("/reset-and-run", response_model=PipelineTriggerResponse)
+async def reset_and_run(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset all processing flags and run the pipeline fresh."""
+    import uuid
+    from sqlalchemy import update as sql_update
+    from app.models.cloud_log import CloudLog
+    from app.models.raw_log import RawLog
+
+    # Reset cloud_logs.is_processed
+    await db.execute(sql_update(CloudLog).values(is_processed=False))
+    # Reset raw_logs.is_segregated
+    await db.execute(sql_update(RawLog).values(is_segregated=False))
+    await db.commit()
+
+    # Reset Firestore is_ingested flags
+    try:
+        from app.services.firestore_service import FirestoreService
+        fs = FirestoreService()
+        fs.reset_ingestion_flags()
+    except Exception as e:
+        pass  # Non-critical — Firestore reset is optional
+
+    run_id = uuid.uuid4()
+    background_tasks.add_task(run_pipeline, "manual")
+
+    return PipelineTriggerResponse(
+        run_id=run_id,
+        status="started",
+        message="All flags reset. Pipeline re-running with fresh data.",
+    )
+
+
 @router.get("/history", response_model=AgentRunListResponse)
 async def list_agent_runs(
     page: int = Query(1, ge=1),

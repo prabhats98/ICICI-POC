@@ -5,6 +5,7 @@ priority classification, and solution generation.
 
 import json
 import logging
+import re
 from typing import Any
 
 from google import genai
@@ -14,6 +15,38 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _parse_json(text: str) -> dict:
+    """Parse JSON from Gemini response, handling common formatting issues."""
+    # Strip markdown code fences if present
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+    
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    
+    # Remove trailing commas before } or ]
+    cleaned = re.sub(r",\s*([}\]])", r"\1", text)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to find the first { ... } block
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+    
+    raise json.JSONDecodeError(f"Could not parse Gemini response", text, 0)
 
 
 class GeminiService:
@@ -32,7 +65,22 @@ class GeminiService:
         Agent 2: Analyze cloud logs for anomalies, spikes, and errors.
         Returns structured analysis with severity scores.
         """
-        logs_text = json.dumps(logs, indent=2, default=str)
+        # Compact logs to reduce token usage — truncate messages, drop verbose fields
+        compact_logs = []
+        for i, log in enumerate(logs):
+            compact_logs.append({
+                "idx": i,
+                "ts": log.get("timestamp", ""),
+                "level": log.get("level", ""),
+                "source": log.get("source", ""),
+                "category": log.get("category", ""),
+                "msg": (log.get("message", "") or "")[:200],
+                "resource": log.get("resource_id", ""),
+                "op": log.get("operation_name", ""),
+            })
+
+        logs_text = json.dumps(compact_logs, indent=1, default=str)
+        logger.info(f"Sending {len(compact_logs)} logs to Gemini ({len(logs_text)} chars)")
 
         prompt = f"""You are an expert Azure cloud infrastructure analyst for a banking system.
 Analyze the following cloud logs and identify:
@@ -75,11 +123,23 @@ LOGS TO ANALYZE:
                 contents=prompt,
                 config=GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=8192,
+                    max_output_tokens=16384,
                     response_mime_type="application/json",
                 ),
             )
-            result = json.loads(response.text)
+
+            # Handle empty/None response
+            response_text = response.text if response.text else ""
+            if not response_text.strip():
+                logger.warning(f"Gemini returned empty response. Candidates: {response.candidates}")
+                return {
+                    "total_logs_analyzed": len(logs),
+                    "issues_found": 0,
+                    "summary": "Gemini returned an empty response — possible token limit or safety filter.",
+                    "issues": [],
+                }
+
+            result = _parse_json(response_text)
             logger.info(f"Gemini analysis complete: {result.get('issues_found', 0)} issues found")
             return result
         except Exception as e:
@@ -133,7 +193,7 @@ ISSUES TO CLASSIFY:
                     response_mime_type="application/json",
                 ),
             )
-            result = json.loads(response.text)
+            result = _parse_json(response.text)
             logger.info(f"Priority classification complete")
             return result.get("classified_issues", [])
         except Exception as e:
@@ -214,7 +274,7 @@ Keep it professional and urgent but not panicked."""
                     response_mime_type="application/json",
                 ),
             )
-            result = json.loads(response.text)
+            result = _parse_json(response.text)
             return result
         except Exception as e:
             logger.error(f"Email generation failed: {e}")

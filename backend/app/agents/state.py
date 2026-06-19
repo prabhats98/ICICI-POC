@@ -28,6 +28,7 @@ class PipelineState(TypedDict, total=False):
     analysis_result: dict[str, Any]  # Full Gemini analysis response
     issues_found: list[dict[str, Any]]
     has_issues: bool
+    logs_analyzed: int  # Number of cloud_logs actually sent to Gemini
     level_distribution: dict[str, int]  # Level breakdown of analyzed logs
     category_distribution: dict[str, int]  # Category breakdown of analyzed logs
 

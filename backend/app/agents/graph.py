@@ -15,6 +15,11 @@ import logging
 from datetime import datetime
 from typing import Any
 
+# Fix: LangGraph accesses langchain.debug which doesn't exist in newer langchain-core
+import langchain
+if not hasattr(langchain, "debug"):
+    langchain.debug = False
+
 from langgraph.graph import StateGraph, END
 
 from app.agents.state import PipelineState
@@ -302,10 +307,13 @@ async def _deep_analyze_low_node(state: PipelineState) -> dict[str, Any]:
 # --- Routing logic ---
 
 def should_continue_after_extraction(state: PipelineState) -> str:
-    """After extraction & segregation, check if there are logs to analyze."""
-    if state.get("total_logs_extracted", 0) > 0:
-        return "anomaly_detector"
-    return END
+    """After extraction & segregation, always continue to anomaly detection.
+    
+    Agent 2 queries unprocessed cloud_logs from the DB independently,
+    so it may find logs even when Agent 1 didn't extract new ones
+    (e.g., from a previous run that was interrupted before analysis).
+    """
+    return "anomaly_detector"
 
 
 def route_after_classification(state: PipelineState) -> str:
@@ -503,7 +511,7 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
                     .values(
                         status=AgentRunStatus.SUCCESS,
                         completed_at=datetime.utcnow(),
-                        logs_processed=result.get("total_logs_extracted", 0),
+                        logs_processed=result.get("logs_analyzed", 0) or result.get("total_logs_extracted", 0),
                         incidents_created=len(result.get("classified_issues", [])),
                         high_priority_count=len(result.get("high_priority_incidents", [])),
                         medium_priority_count=len(result.get("medium_priority_incidents", [])),
@@ -522,7 +530,7 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
             "duration": total_duration,
             "summary": {
                 "total_duration": total_duration,
-                "logs_processed": result.get("total_logs_extracted", 0),
+                "logs_processed": result.get("logs_analyzed", 0) or result.get("total_logs_extracted", 0),
                 "segregation": result.get("segregation_summary", {}),
                 "issues_found": len(result.get("issues_found", [])),
                 "level_distribution": result.get("level_distribution", {}),

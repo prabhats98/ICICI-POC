@@ -43,9 +43,7 @@ async def anomaly_detector_node(state: PipelineState) -> dict[str, Any]:
             # Step 1: Read segregated logs from PostgreSQL
             # If we have specific IDs from Agent 1, use those; otherwise get unprocessed
             if segregated_ids:
-                import uuid as uuid_mod
-                id_list = [uuid_mod.UUID(sid) for sid in segregated_ids]
-                query = select(CloudLog).where(CloudLog.id.in_(id_list))
+                query = select(CloudLog).where(CloudLog.id.in_(segregated_ids))
             else:
                 query = (
                     select(CloudLog)
@@ -137,6 +135,7 @@ async def anomaly_detector_node(state: PipelineState) -> dict[str, Any]:
                 "analysis_result": analysis_result,
                 "issues_found": issues,
                 "has_issues": has_issues,
+                "logs_analyzed": len(structured_logs),
                 "export_paths": export_paths,
                 "level_distribution": level_distribution,
                 "category_distribution": category_distribution,

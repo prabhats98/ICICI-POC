@@ -508,9 +508,17 @@ body {
   box-shadow: var(--shadow-glow-indigo);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 0 30px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet));
 }
 
 .btn-secondary {
@@ -1637,6 +1645,278 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
+/* ============================================
+   Pipeline Progress Banner
+   ============================================ */
+.pipeline-banner {
+  position: relative;
+  z-index: 10;
+  padding: 12px 24px 0;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  animation: banner-slide-down 0.3s ease-out;
+}
+
+@keyframes banner-slide-down {
+  from { opacity: 0; transform: translateY(-100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.pipeline-banner-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.pipeline-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pipeline-banner-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: pipeline-pulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pipeline-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+}
+
+.pipeline-banner-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-emerald);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.pipeline-banner-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pipeline-banner-step {
+  font-size: 13px;
+  color: var(--accent-blue);
+  font-weight: 500;
+  padding: 3px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--radius-full);
+  animation: step-appear 0.3s ease-out;
+}
+
+@keyframes step-appear {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.pipeline-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pipeline-banner-counter {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  padding: 3px 10px;
+  background: var(--bg-glass);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+}
+
+.pipeline-banner-timer {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-amber);
+  font-family: var(--font-mono);
+}
+
+.pipeline-banner-bar-track {
+  height: 3px;
+  background: var(--bg-glass);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.pipeline-banner-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-indigo), var(--accent-blue), var(--accent-emerald));
+  border-radius: var(--radius-full);
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.pipeline-banner.running .pipeline-banner-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.pipeline-banner.done .pipeline-banner-bar-fill {
+  background: var(--accent-emerald);
+}
+
+/* ============================================
+   Node Result Card (inside nodes)
+   ============================================ */
+.node-result-card {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  animation: result-card-appear 0.4s ease-out;
+}
+
+@keyframes result-card-appear {
+  from { opacity: 0; max-height: 0; padding-top: 0; margin-top: 0; }
+  to { opacity: 1; max-height: 80px; }
+}
+
+.node-result-running {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--accent-blue);
+  font-weight: 500;
+  animation: result-pulse 2s ease-in-out infinite;
+}
+
+@keyframes result-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.node-result-output {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--accent-emerald);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.node-result-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.node-result-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.node-result-duration {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-glass);
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+/* ============================================
+   Enhanced Workflow Node States
+   ============================================ */
+
+/* Running state — glowing border + pulsing shadow */
+.workflow-node.running {
+  border-color: var(--status-running);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3), 0 0 40px rgba(59, 130, 246, 0.1);
+  animation: node-glow 2s ease-in-out infinite;
+}
+
+@keyframes node-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.25), 0 0 30px rgba(59, 130, 246, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(59, 130, 246, 0.45), 0 0 50px rgba(59, 130, 246, 0.15);
+  }
+}
+
+/* Completed state — green border + subtle glow */
+.workflow-node.completed {
+  border-color: var(--status-success);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+  transition: all 0.4s ease-out;
+}
+
+/* Completion checkmark badge */
+.node-done-badge {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-emerald);
+  color: white;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  animation: badge-pop 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes badge-pop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* Deep analysis nodes while running */
+.workflow-node.deep-analysis.running {
+  border-color: var(--accent-violet);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.35), 0 0 40px rgba(139, 92, 246, 0.1);
+  animation: node-glow-violet 2s ease-in-out infinite;
+}
+
+@keyframes node-glow-violet {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.25), 0 0 30px rgba(139, 92, 246, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(139, 92, 246, 0.45), 0 0 50px rgba(139, 92, 246, 0.15);
+  }
+}
 /* --- Responsive --- */
 @media (max-width: 1024px) {
   .stats-grid {

@@ -172,7 +172,7 @@ async def seed_raw_logs(count: int = 50):
             }
 
             raw_log = RawLog(
-                id=uuid.uuid4(),
+                id=str(uuid.uuid4()),
                 ingested_at=now - timedelta(minutes=random.randint(1, 60)),
                 source_system="azure-monitor",
                 raw_payload=payload,
