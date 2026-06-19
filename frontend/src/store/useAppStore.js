@@ -22,6 +22,15 @@ const useAppStore = create((set) => ({
   // Notifications
   notifications: [],
 
+  // Node I/O data — map of nodeId → { input, output, startedAt, completedAt }
+  nodeData: {},
+
+  // Pipeline summary (populated on pipeline_complete)
+  pipelineSummary: null,
+
+  // Summary modal visibility
+  showSummaryModal: false,
+
   // Actions
   setDashboard: (data) => set({ dashboard: data, isDashboardLoading: false }),
   setDashboardLoading: (loading) => set({ isDashboardLoading: loading }),
@@ -29,6 +38,19 @@ const useAppStore = create((set) => ({
   setCurrentNode: (node) => set({ currentNode: node }),
   setWsConnected: (connected) => set({ wsConnected: connected }),
   setActivePage: (page) => set({ activePage: page }),
+
+  setNodeData: (nodeId, data) =>
+    set((state) => ({
+      nodeData: {
+        ...state.nodeData,
+        [nodeId]: { ...(state.nodeData[nodeId] || {}), ...data },
+      },
+    })),
+
+  setPipelineSummary: (summary) => set({ pipelineSummary: summary }),
+  setShowSummaryModal: (show) => set({ showSummaryModal: show }),
+
+  clearPipelineData: () => set({ nodeData: {}, pipelineSummary: null, showSummaryModal: false }),
   
   addNotification: (notification) =>
     set((state) => ({

@@ -8,7 +8,16 @@ import useAppStore from '../store/useAppStore';
 export default function useWebSocket() {
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
-  const { setWsConnected, setPipelineRunning, setCurrentNode, addNotification } = useAppStore();
+  const {
+    setWsConnected,
+    setPipelineRunning,
+    setCurrentNode,
+    addNotification,
+    setNodeData,
+    setPipelineSummary,
+    setShowSummaryModal,
+    clearPipelineData,
+  } = useAppStore();
 
   const connect = useCallback(() => {
     try {
@@ -25,24 +34,44 @@ export default function useWebSocket() {
           
           switch (data.event) {
             case 'pipeline_start':
+              clearPipelineData();
               setPipelineRunning(true);
               setCurrentNode('start');
               addNotification({ type: 'info', message: 'Pipeline started' });
               break;
+
             case 'node_active':
               setCurrentNode(data.node);
+              setNodeData(data.node, {
+                input: data.input || null,
+                startedAt: Date.now(),
+              });
               break;
+
             case 'node_complete':
-              // Node completed, wait for next
+              setNodeData(data.node, {
+                output: data.output || null,
+                completedAt: Date.now(),
+                duration: data.duration || null,
+              });
               break;
+
             case 'pipeline_complete':
               setPipelineRunning(false);
               setCurrentNode(null);
+              setPipelineSummary({
+                runId: data.run_id,
+                status: data.status,
+                duration: data.duration,
+                ...(data.summary || {}),
+              });
+              setShowSummaryModal(true);
               addNotification({
                 type: 'success',
-                message: `Pipeline completed: ${data.incidents || 0} incidents found`,
+                message: `Pipeline completed in ${data.duration}s`,
               });
               break;
+
             case 'pipeline_error':
               setPipelineRunning(false);
               setCurrentNode(null);
@@ -69,7 +98,7 @@ export default function useWebSocket() {
       console.error('[WS] Connection error:', e);
       reconnectTimer.current = setTimeout(connect, 5000);
     }
-  }, [setWsConnected, setPipelineRunning, setCurrentNode, addNotification]);
+  }, [setWsConnected, setPipelineRunning, setCurrentNode, addNotification, setNodeData, setPipelineSummary, setShowSummaryModal, clearPipelineData]);
 
   useEffect(() => {
     connect();

@@ -1,6 +1,7 @@
 /**
  * WorkflowView Page - React Flow visualization of the agent pipeline.
- * Includes deep code analysis nodes, Solution Architect naming, and node config modal.
+ * Includes deep code analysis nodes, Solution Architect naming, node config modal,
+ * real-time I/O data panels on nodes, and a pipeline summary modal.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -18,6 +19,39 @@ import '@xyflow/react/dist/style.css';
 import useAppStore from '../store/useAppStore';
 import { getWorkflowState, triggerPipeline } from '../services/api';
 import NodeConfigModal from '../components/NodeConfigModal';
+
+// --- Node I/O Panel (rendered inside each node) ---
+function NodeIOPanel({ nodeId }) {
+  const nodeData = useAppStore((s) => s.nodeData[nodeId]);
+  if (!nodeData) return null;
+
+  const hasInput = nodeData.input && nodeData.input.description;
+  const hasOutput = nodeData.output && nodeData.output.description;
+
+  if (!hasInput && !hasOutput) return null;
+
+  return (
+    <div className="node-io-panel">
+      {hasInput && (
+        <div className="node-io-item node-io-input">
+          <span className="node-io-icon">📥</span>
+          <span className="node-io-text">{nodeData.input.description}</span>
+        </div>
+      )}
+      {hasOutput && (
+        <div className="node-io-item node-io-output">
+          <span className="node-io-icon">📤</span>
+          <span className="node-io-text">{nodeData.output.description}</span>
+        </div>
+      )}
+      {nodeData.duration != null && (
+        <div className="node-io-duration">
+          ⏱ {nodeData.duration}s
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Custom node component
 function WorkflowNode({ data }) {
@@ -42,6 +76,7 @@ function WorkflowNode({ data }) {
         )}
       </div>
       <div className="workflow-node-subtitle">{data.subtitle}</div>
+      <NodeIOPanel nodeId={data.nodeId} />
       <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
     </div>
   );
@@ -68,6 +103,7 @@ function DecisionNode({ data }) {
         )}
       </div>
       <div className="workflow-node-subtitle">{data.subtitle}</div>
+      <NodeIOPanel nodeId={data.nodeId} />
       <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
     </div>
   );
@@ -90,6 +126,7 @@ const initialNodes = [
       iconBg: 'rgba(245,158,11,0.2)',
       iconColor: '#f59e0b',
       status: 'idle',
+      nodeId: 'start',
     },
   },
   {
@@ -103,6 +140,7 @@ const initialNodes = [
       iconBg: 'rgba(16,185,129,0.2)',
       iconColor: '#10b981',
       status: 'idle',
+      nodeId: 'log_extractor',
     },
   },
   {
@@ -116,6 +154,7 @@ const initialNodes = [
       iconBg: 'rgba(244,63,94,0.2)',
       iconColor: '#f43f5e',
       status: 'idle',
+      nodeId: 'anomaly_detector',
     },
   },
   {
@@ -126,6 +165,7 @@ const initialNodes = [
       label: 'Classify & Prioritize',
       subtitle: 'Agent 3: HIGH / MEDIUM / LOW',
       status: 'idle',
+      nodeId: 'priority_classifier',
     },
   },
   // --- Deep Code Analysis Nodes (Purple/Violet) ---
@@ -141,6 +181,7 @@ const initialNodes = [
       iconColor: '#8b5cf6',
       status: 'idle',
       extraClass: 'deep-analysis',
+      nodeId: 'deep_code_analyzer_high',
     },
   },
   {
@@ -155,6 +196,7 @@ const initialNodes = [
       iconColor: '#8b5cf6',
       status: 'idle',
       extraClass: 'deep-analysis',
+      nodeId: 'deep_code_analyzer_medium',
     },
   },
   {
@@ -169,6 +211,7 @@ const initialNodes = [
       iconColor: '#8b5cf6',
       status: 'idle',
       extraClass: 'deep-analysis',
+      nodeId: 'deep_code_analyzer_low',
     },
   },
   // --- Solution Architect + Email Nodes ---
@@ -183,6 +226,7 @@ const initialNodes = [
       iconBg: 'rgba(239,68,68,0.2)',
       iconColor: '#ef4444',
       status: 'idle',
+      nodeId: 'high_priority_handler',
     },
   },
   {
@@ -196,6 +240,7 @@ const initialNodes = [
       iconBg: 'rgba(59,130,246,0.2)',
       iconColor: '#3b82f6',
       status: 'idle',
+      nodeId: 'medium_priority_handler',
     },
   },
   {
@@ -209,6 +254,7 @@ const initialNodes = [
       iconBg: 'rgba(100,116,139,0.2)',
       iconColor: '#94a3b8',
       status: 'idle',
+      nodeId: 'low_priority_handler',
     },
   },
   // --- End Nodes ---
@@ -223,6 +269,7 @@ const initialNodes = [
       iconBg: 'rgba(239,68,68,0.2)',
       iconColor: '#ef4444',
       status: 'idle',
+      nodeId: 'end_high',
     },
   },
   {
@@ -236,6 +283,7 @@ const initialNodes = [
       iconBg: 'rgba(239,68,68,0.2)',
       iconColor: '#ef4444',
       status: 'idle',
+      nodeId: 'end_medium',
     },
   },
   {
@@ -249,6 +297,7 @@ const initialNodes = [
       iconBg: 'rgba(239,68,68,0.2)',
       iconColor: '#ef4444',
       status: 'idle',
+      nodeId: 'end_low',
     },
   },
 ];
@@ -274,6 +323,180 @@ const initialEdges = [
   { id: 'e-medium-end', source: 'medium_priority_handler', target: 'end_medium', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
   { id: 'e-low-end', source: 'low_priority_handler', target: 'end_low', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
 ];
+
+// --- Node metadata for summary display ---
+const NODE_META = {
+  log_extractor: { label: 'Extract Monitoring Data', icon: '📊', color: '#10b981' },
+  anomaly_detector: { label: 'Detect Spikes & Anomalies', icon: '🔍', color: '#f43f5e' },
+  priority_classifier: { label: 'Classify & Prioritize', icon: '⚖️', color: '#f59e0b' },
+  deep_code_analyzer_high: { label: 'Critical Root Cause Analysis', icon: '🔬', color: '#8b5cf6' },
+  deep_code_analyzer_medium: { label: 'Impact & Code Analysis', icon: '🧬', color: '#8b5cf6' },
+  deep_code_analyzer_low: { label: 'Pattern & Trend Analysis', icon: '📊', color: '#8b5cf6' },
+  high_priority_handler: { label: 'Emergency Response', icon: '🚨', color: '#ef4444' },
+  medium_priority_handler: { label: 'Solution Architect', icon: '🏗️', color: '#3b82f6' },
+  low_priority_handler: { label: 'Advisory Report', icon: '📋', color: '#94a3b8' },
+};
+
+// --- Pipeline Summary Modal ---
+function PipelineSummaryModal() {
+  const pipelineSummary = useAppStore((s) => s.pipelineSummary);
+  const showSummaryModal = useAppStore((s) => s.showSummaryModal);
+  const setShowSummaryModal = useAppStore((s) => s.setShowSummaryModal);
+  const nodeData = useAppStore((s) => s.nodeData);
+
+  if (!showSummaryModal || !pipelineSummary) return null;
+
+  const s = pipelineSummary;
+  const totalEmails = (s.emails_sent?.high || 0) + (s.emails_sent?.medium || 0) + (s.emails_sent?.low || 0);
+  const totalSolutions = (s.solutions?.high || 0) + (s.solutions?.medium || 0) + (s.solutions?.low || 0);
+  const totalAnalyses = (s.deep_analyses?.high || 0) + (s.deep_analyses?.medium || 0) + (s.deep_analyses?.low || 0);
+
+  // Build per-node timeline from nodeData
+  const nodeTimeline = Object.entries(nodeData)
+    .filter(([id]) => NODE_META[id])
+    .sort((a, b) => (a[1].startedAt || 0) - (b[1].startedAt || 0))
+    .map(([id, data]) => ({
+      id,
+      meta: NODE_META[id],
+      input: data.input?.description || '—',
+      output: data.output?.description || '—',
+      duration: data.duration,
+    }));
+
+  return (
+    <div className="psm-overlay" onClick={() => setShowSummaryModal(false)}>
+      <div className="psm-modal" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="psm-header">
+          <div className="psm-header-info">
+            <div className="psm-header-row">
+              <span className="psm-status-badge">✓ Completed</span>
+              <span className="psm-duration-badge">⏱ {s.total_duration || s.duration}s</span>
+            </div>
+            <h2 className="psm-title">Pipeline Run Summary</h2>
+            <p className="psm-run-id">Run ID: {s.runId || '—'}</p>
+          </div>
+          <button className="psm-close" onClick={() => setShowSummaryModal(false)}>✕</button>
+        </div>
+
+        {/* Body */}
+        <div className="psm-body">
+          {/* Aggregated Stats */}
+          <div className="psm-stats-grid">
+            <div className="psm-stat">
+              <div className="psm-stat-value">{s.logs_processed || 0}</div>
+              <div className="psm-stat-label">Logs Processed</div>
+            </div>
+            <div className="psm-stat">
+              <div className="psm-stat-value">{s.issues_found || 0}</div>
+              <div className="psm-stat-label">Issues Found</div>
+            </div>
+            <div className="psm-stat">
+              <div className="psm-stat-value">{s.total_incidents || 0}</div>
+              <div className="psm-stat-label">Incidents</div>
+            </div>
+            <div className="psm-stat">
+              <div className="psm-stat-value">{totalEmails}</div>
+              <div className="psm-stat-label">Emails Sent</div>
+            </div>
+            <div className="psm-stat">
+              <div className="psm-stat-value">{totalSolutions}</div>
+              <div className="psm-stat-label">Solutions</div>
+            </div>
+            <div className="psm-stat">
+              <div className="psm-stat-value">{totalAnalyses}</div>
+              <div className="psm-stat-label">Deep Analyses</div>
+            </div>
+          </div>
+
+          {/* Priority Breakdown */}
+          <div className="psm-section">
+            <h3 className="psm-section-title">Priority Breakdown</h3>
+            <div className="psm-priority-row">
+              <div className="psm-priority-card psm-priority-high">
+                <span className="psm-priority-label">🔴 HIGH</span>
+                <span className="psm-priority-count">{s.high_priority || 0}</span>
+                <div className="psm-priority-detail">
+                  {s.emails_sent?.high || 0} emails · {s.solutions?.high || 0} solutions
+                </div>
+              </div>
+              <div className="psm-priority-card psm-priority-medium">
+                <span className="psm-priority-label">🟡 MEDIUM</span>
+                <span className="psm-priority-count">{s.medium_priority || 0}</span>
+                <div className="psm-priority-detail">
+                  {s.emails_sent?.medium || 0} emails · {s.solutions?.medium || 0} solutions
+                </div>
+              </div>
+              <div className="psm-priority-card psm-priority-low">
+                <span className="psm-priority-label">🟢 LOW</span>
+                <span className="psm-priority-count">{s.low_priority || 0}</span>
+                <div className="psm-priority-detail">
+                  {s.emails_sent?.low || 0} emails · {s.solutions?.low || 0} solutions
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Node Timeline */}
+          {nodeTimeline.length > 0 && (
+            <div className="psm-section">
+              <h3 className="psm-section-title">Node Execution Timeline</h3>
+              <div className="psm-timeline">
+                {nodeTimeline.map((node, i) => (
+                  <div className="psm-timeline-item" key={node.id}>
+                    <div className="psm-timeline-connector">
+                      <div className="psm-timeline-dot" style={{ background: node.meta.color }}></div>
+                      {i < nodeTimeline.length - 1 && <div className="psm-timeline-line"></div>}
+                    </div>
+                    <div className="psm-timeline-content">
+                      <div className="psm-timeline-header">
+                        <span className="psm-timeline-icon">{node.meta.icon}</span>
+                        <span className="psm-timeline-name">{node.meta.label}</span>
+                        {node.duration != null && (
+                          <span className="psm-timeline-duration">{node.duration}s</span>
+                        )}
+                      </div>
+                      <div className="psm-timeline-io">
+                        <div className="psm-timeline-io-row">
+                          <span className="psm-io-badge psm-io-in">IN</span>
+                          <span>{node.input}</span>
+                        </div>
+                        <div className="psm-timeline-io-row">
+                          <span className="psm-io-badge psm-io-out">OUT</span>
+                          <span>{node.output}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Errors */}
+          {s.errors && s.errors.length > 0 && (
+            <div className="psm-section">
+              <h3 className="psm-section-title" style={{ color: 'var(--priority-high)' }}>⚠ Errors</h3>
+              <div className="psm-errors">
+                {s.errors.map((err, i) => (
+                  <div className="psm-error-item" key={i}>{err}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="psm-footer">
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowSummaryModal(false)}>
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 export default function WorkflowView() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -375,6 +598,9 @@ export default function WorkflowView() {
           onClose={() => setSelectedNode(null)}
         />
       )}
+
+      {/* Pipeline Summary Modal */}
+      <PipelineSummaryModal />
     </div>
   );
 }
