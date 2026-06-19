@@ -37,15 +37,23 @@ class PipelineState(TypedDict, total=False):
     medium_priority_incidents: list[dict[str, Any]]
     low_priority_incidents: list[dict[str, Any]]
 
+    # --- Agent 5: Deep Code Analyzer outputs ---
+    deep_analysis_high: list[dict[str, Any]]
+    deep_analysis_medium: list[dict[str, Any]]
+    deep_analysis_low: list[dict[str, Any]]
+
     # --- Agent 4a: High Priority Handler outputs ---
     high_priority_solutions: list[dict[str, Any]]
     emails_sent: list[str]
 
-    # --- Agent 4b: Medium Priority Handler outputs ---
+    # --- Agent 4b: Medium Priority Handler (Remediation Engine) outputs ---
     medium_priority_solutions: list[dict[str, Any]]
+    medium_emails_sent: list[str]
 
     # --- Agent 4c: Low Priority Handler outputs ---
     low_priority_logged: int
+    low_priority_solutions: list[dict[str, Any]]
+    low_emails_sent: list[str]
 
     # --- Export ---
     export_paths: list[str]

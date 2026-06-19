@@ -23,6 +23,11 @@ from app.agents.priority_classifier import priority_classifier_node
 from app.agents.high_priority_handler import high_priority_handler_node
 from app.agents.medium_priority_handler import medium_priority_handler_node
 from app.agents.low_priority_handler import low_priority_handler_node
+from app.agents.deep_code_analyzer import (
+    deep_code_analyzer_high_node,
+    deep_code_analyzer_medium_node,
+    deep_code_analyzer_low_node,
+)
 from app.database import async_session
 from app.models.agent_run import AgentRun, AgentRunStatus
 
@@ -103,6 +108,41 @@ async def _low_node(state: PipelineState) -> dict[str, Any]:
     return result
 
 
+# --- Deep Code Analyzer wrapper nodes ---
+
+async def _deep_analyze_high_node(state: PipelineState) -> dict[str, Any]:
+    await _broadcast("node_active", {"node": "deep_code_analyzer_high", "status": "running"})
+    result = await deep_code_analyzer_high_node(state)
+    await _broadcast("node_complete", {
+        "node": "deep_code_analyzer_high",
+        "status": "completed",
+        "analyses": len(result.get("deep_analysis_high", [])),
+    })
+    return result
+
+
+async def _deep_analyze_medium_node(state: PipelineState) -> dict[str, Any]:
+    await _broadcast("node_active", {"node": "deep_code_analyzer_medium", "status": "running"})
+    result = await deep_code_analyzer_medium_node(state)
+    await _broadcast("node_complete", {
+        "node": "deep_code_analyzer_medium",
+        "status": "completed",
+        "analyses": len(result.get("deep_analysis_medium", [])),
+    })
+    return result
+
+
+async def _deep_analyze_low_node(state: PipelineState) -> dict[str, Any]:
+    await _broadcast("node_active", {"node": "deep_code_analyzer_low", "status": "running"})
+    result = await deep_code_analyzer_low_node(state)
+    await _broadcast("node_complete", {
+        "node": "deep_code_analyzer_low",
+        "status": "completed",
+        "analyses": len(result.get("deep_analysis_low", [])),
+    })
+    return result
+
+
 # --- Routing logic ---
 
 def should_continue_after_extraction(state: PipelineState) -> str:
@@ -113,31 +153,31 @@ def should_continue_after_extraction(state: PipelineState) -> str:
 
 
 def route_after_classification(state: PipelineState) -> str:
-    """After classification, route based on detected priorities."""
+    """After classification, route to deep analysis based on detected priorities."""
     has_high = len(state.get("high_priority_incidents", [])) > 0
     has_medium = len(state.get("medium_priority_incidents", [])) > 0
 
     if has_high:
-        return "high_priority_handler"
+        return "deep_code_analyzer_high"
     elif has_medium:
-        return "medium_priority_handler"
+        return "deep_code_analyzer_medium"
     else:
-        return "low_priority_handler"
+        return "deep_code_analyzer_low"
 
 
 def route_after_high(state: PipelineState) -> str:
     """After high priority, check if medium needs handling."""
     if len(state.get("medium_priority_incidents", [])) > 0:
-        return "medium_priority_handler"
+        return "deep_code_analyzer_medium"
     elif len(state.get("low_priority_incidents", [])) > 0:
-        return "low_priority_handler"
+        return "deep_code_analyzer_low"
     return END
 
 
 def route_after_medium(state: PipelineState) -> str:
     """After medium priority, check if low needs handling."""
     if len(state.get("low_priority_incidents", [])) > 0:
-        return "low_priority_handler"
+        return "deep_code_analyzer_low"
     return END
 
 
@@ -151,6 +191,9 @@ def build_pipeline() -> StateGraph:
     graph.add_node("log_extractor", _extract_node)
     graph.add_node("anomaly_detector", _detect_node)
     graph.add_node("priority_classifier", _classify_node)
+    graph.add_node("deep_code_analyzer_high", _deep_analyze_high_node)
+    graph.add_node("deep_code_analyzer_medium", _deep_analyze_medium_node)
+    graph.add_node("deep_code_analyzer_low", _deep_analyze_low_node)
     graph.add_node("high_priority_handler", _high_node)
     graph.add_node("medium_priority_handler", _medium_node)
     graph.add_node("low_priority_handler", _low_node)
@@ -170,22 +213,29 @@ def build_pipeline() -> StateGraph:
 
     graph.add_edge("anomaly_detector", "priority_classifier")
 
+    # Classifier routes to deep analysis nodes first
     graph.add_conditional_edges(
         "priority_classifier",
         route_after_classification,
         {
-            "high_priority_handler": "high_priority_handler",
-            "medium_priority_handler": "medium_priority_handler",
-            "low_priority_handler": "low_priority_handler",
+            "deep_code_analyzer_high": "deep_code_analyzer_high",
+            "deep_code_analyzer_medium": "deep_code_analyzer_medium",
+            "deep_code_analyzer_low": "deep_code_analyzer_low",
         },
     )
 
+    # Deep analysis → Handler
+    graph.add_edge("deep_code_analyzer_high", "high_priority_handler")
+    graph.add_edge("deep_code_analyzer_medium", "medium_priority_handler")
+    graph.add_edge("deep_code_analyzer_low", "low_priority_handler")
+
+    # After handlers, check remaining priorities
     graph.add_conditional_edges(
         "high_priority_handler",
         route_after_high,
         {
-            "medium_priority_handler": "medium_priority_handler",
-            "low_priority_handler": "low_priority_handler",
+            "deep_code_analyzer_medium": "deep_code_analyzer_medium",
+            "deep_code_analyzer_low": "deep_code_analyzer_low",
             END: END,
         },
     )
@@ -194,7 +244,7 @@ def build_pipeline() -> StateGraph:
         "medium_priority_handler",
         route_after_medium,
         {
-            "low_priority_handler": "low_priority_handler",
+            "deep_code_analyzer_low": "deep_code_analyzer_low",
             END: END,
         },
     )
@@ -263,9 +313,15 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
         "high_priority_incidents": [],
         "medium_priority_incidents": [],
         "low_priority_incidents": [],
+        "deep_analysis_high": [],
+        "deep_analysis_medium": [],
+        "deep_analysis_low": [],
         "high_priority_solutions": [],
         "medium_priority_solutions": [],
+        "low_priority_solutions": [],
         "emails_sent": [],
+        "medium_emails_sent": [],
+        "low_emails_sent": [],
         "low_priority_logged": 0,
         "export_paths": [],
         "errors": [],

@@ -17,6 +17,7 @@ from app.api.agents import router as agents_router
 from app.api.workflow import router as workflow_router
 from app.api.export import router as export_router
 from app.api.websocket import router as ws_router, broadcast_event
+from app.api.node_config import router as node_config_router
 from app.services.scheduler_service import start_scheduler, stop_scheduler
 from app.agents.graph import set_broadcast_callback
 
@@ -73,6 +74,7 @@ app.include_router(agents_router)
 app.include_router(workflow_router)
 app.include_router(export_router)
 app.include_router(ws_router)
+app.include_router(node_config_router)
 
 
 @app.get("/", tags=["Health"])

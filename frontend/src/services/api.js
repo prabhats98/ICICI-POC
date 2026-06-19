@@ -33,6 +33,10 @@ export const getAgentHistory = (params) => api.get('/api/agents/history', { para
 // --- Workflow ---
 export const getWorkflowState = () => api.get('/api/workflow/state');
 
+// --- Node Config ---
+export const getNodeConfig = (nodeId) => api.get(`/api/workflow/nodes/${nodeId}/config`);
+export const updateNodeConfig = (nodeId, params) => api.put(`/api/workflow/nodes/${nodeId}/config`, { params });
+
 // --- Export ---
 export const exportLogs = (format = 'json') => api.get(`/api/export/logs?format=${format}`, { responseType: 'blob' });
 export const exportIncidents = (format = 'json') => api.get(`/api/export/incidents?format=${format}`, { responseType: 'blob' });

@@ -18,10 +18,13 @@ WORKFLOW_NODES = [
     {"node_id": "start", "node_name": "Start"},
     {"node_id": "log_extractor", "node_name": "Extract Monitoring Data"},
     {"node_id": "anomaly_detector", "node_name": "Detect Spikes & Anomalies"},
-    {"node_id": "priority_classifier", "node_name": "Decide on Spike Detection"},
-    {"node_id": "high_priority_handler", "node_name": "Send Alert Email"},
-    {"node_id": "medium_priority_handler", "node_name": "Auto-Solution Agent"},
-    {"node_id": "low_priority_handler", "node_name": "Log Data (No Spike)"},
+    {"node_id": "priority_classifier", "node_name": "Classify & Prioritize"},
+    {"node_id": "deep_code_analyzer_high", "node_name": "Deep Code Analysis (High)"},
+    {"node_id": "deep_code_analyzer_medium", "node_name": "Deep Code Analysis (Medium)"},
+    {"node_id": "deep_code_analyzer_low", "node_name": "Deep Code Analysis (Low)"},
+    {"node_id": "high_priority_handler", "node_name": "Solution Architect + Email (High)"},
+    {"node_id": "medium_priority_handler", "node_name": "Solution Architect + Email (Medium)"},
+    {"node_id": "low_priority_handler", "node_name": "Solution Architect + Email (Low)"},
     {"node_id": "end", "node_name": "End"},
 ]
 

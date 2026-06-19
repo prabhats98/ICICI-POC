@@ -1,5 +1,6 @@
 /**
  * WorkflowView Page - React Flow visualization of the agent pipeline.
+ * Includes deep code analysis nodes, Solution Architect naming, and node config modal.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -16,12 +17,14 @@ import {
 import '@xyflow/react/dist/style.css';
 import useAppStore from '../store/useAppStore';
 import { getWorkflowState, triggerPipeline } from '../services/api';
+import NodeConfigModal from '../components/NodeConfigModal';
 
 // Custom node component
 function WorkflowNode({ data }) {
   const statusClass = data.status || 'idle';
+  const extraClass = data.extraClass || '';
   return (
-    <div className={`workflow-node ${statusClass}`}>
+    <div className={`workflow-node ${statusClass} ${extraClass}`}>
       <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
       <div className="workflow-node-header">
         <div
@@ -125,27 +128,71 @@ const initialNodes = [
       status: 'idle',
     },
   },
+  // --- Deep Code Analysis Nodes (Purple/Violet) ---
   {
-    id: 'high_priority_handler',
+    id: 'deep_code_analyzer_high',
     type: 'workflowNode',
     position: { x: 80, y: 500 },
     data: {
-      label: 'Send Alert Email',
-      subtitle: 'Agent 4a: Email + Solution',
-      icon: '📧',
-      iconBg: 'rgba(16,185,129,0.2)',
-      iconColor: '#10b981',
+      label: 'Critical Root Cause Analysis',
+      subtitle: 'Agent 5: Deep code forensics',
+      icon: '🔬',
+      iconBg: 'rgba(139,92,246,0.2)',
+      iconColor: '#8b5cf6',
+      status: 'idle',
+      extraClass: 'deep-analysis',
+    },
+  },
+  {
+    id: 'deep_code_analyzer_medium',
+    type: 'workflowNode',
+    position: { x: 350, y: 500 },
+    data: {
+      label: 'Impact & Code Analysis',
+      subtitle: 'Agent 5: Code-level assessment',
+      icon: '🧬',
+      iconBg: 'rgba(139,92,246,0.2)',
+      iconColor: '#8b5cf6',
+      status: 'idle',
+      extraClass: 'deep-analysis',
+    },
+  },
+  {
+    id: 'deep_code_analyzer_low',
+    type: 'workflowNode',
+    position: { x: 620, y: 500 },
+    data: {
+      label: 'Pattern & Trend Analysis',
+      subtitle: 'Agent 5: Proactive insights',
+      icon: '📊',
+      iconBg: 'rgba(139,92,246,0.2)',
+      iconColor: '#8b5cf6',
+      status: 'idle',
+      extraClass: 'deep-analysis',
+    },
+  },
+  // --- Solution Architect + Email Nodes ---
+  {
+    id: 'high_priority_handler',
+    type: 'workflowNode',
+    position: { x: 80, y: 640 },
+    data: {
+      label: 'Emergency Response + Email',
+      subtitle: 'Agent 4a: Urgent resolution',
+      icon: '🚨',
+      iconBg: 'rgba(239,68,68,0.2)',
+      iconColor: '#ef4444',
       status: 'idle',
     },
   },
   {
     id: 'medium_priority_handler',
     type: 'workflowNode',
-    position: { x: 350, y: 500 },
+    position: { x: 350, y: 640 },
     data: {
-      label: 'Auto-Solution Agent',
-      subtitle: 'Agent 4b: Find fix on-the-go',
-      icon: '🧠',
+      label: 'Solution Architect + Email',
+      subtitle: 'Agent 4b: Detailed fix report',
+      icon: '🏗️',
       iconBg: 'rgba(59,130,246,0.2)',
       iconColor: '#3b82f6',
       status: 'idle',
@@ -154,20 +201,21 @@ const initialNodes = [
   {
     id: 'low_priority_handler',
     type: 'workflowNode',
-    position: { x: 620, y: 500 },
+    position: { x: 620, y: 640 },
     data: {
-      label: 'Log Data (No Spike)',
-      subtitle: 'Agent 4c: Log & Monitor',
-      icon: '📝',
+      label: 'Advisory Report + Email',
+      subtitle: 'Agent 4c: Informational digest',
+      icon: '📋',
       iconBg: 'rgba(100,116,139,0.2)',
       iconColor: '#94a3b8',
       status: 'idle',
     },
   },
+  // --- End Nodes ---
   {
     id: 'end_high',
     type: 'workflowNode',
-    position: { x: 80, y: 640 },
+    position: { x: 80, y: 780 },
     data: {
       label: 'End',
       subtitle: 'High priority path complete',
@@ -180,7 +228,7 @@ const initialNodes = [
   {
     id: 'end_medium',
     type: 'workflowNode',
-    position: { x: 350, y: 640 },
+    position: { x: 350, y: 780 },
     data: {
       label: 'End',
       subtitle: 'Medium priority path complete',
@@ -193,7 +241,7 @@ const initialNodes = [
   {
     id: 'end_low',
     type: 'workflowNode',
-    position: { x: 620, y: 640 },
+    position: { x: 620, y: 780 },
     data: {
       label: 'End',
       subtitle: 'Low priority path complete',
@@ -206,12 +254,22 @@ const initialNodes = [
 ];
 
 const initialEdges = [
+  // Start → Extract → Detect → Classify
   { id: 'e-start-extract', source: 'start', target: 'log_extractor', animated: true, style: { stroke: 'var(--accent-indigo)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-indigo)' } },
   { id: 'e-extract-detect', source: 'log_extractor', target: 'anomaly_detector', animated: true, style: { stroke: 'var(--accent-emerald)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-emerald)' } },
   { id: 'e-detect-classify', source: 'anomaly_detector', target: 'priority_classifier', animated: true, style: { stroke: 'var(--accent-amber)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-amber)' } },
-  { id: 'e-classify-high', source: 'priority_classifier', target: 'high_priority_handler', animated: true, label: 'HIGH', style: { stroke: '#ef4444' }, labelStyle: { fill: '#ef4444', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#ef4444' } },
-  { id: 'e-classify-medium', source: 'priority_classifier', target: 'medium_priority_handler', animated: true, label: 'MEDIUM', style: { stroke: '#f59e0b' }, labelStyle: { fill: '#f59e0b', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b' } },
-  { id: 'e-classify-low', source: 'priority_classifier', target: 'low_priority_handler', animated: true, label: 'LOW', style: { stroke: '#10b981' }, labelStyle: { fill: '#10b981', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#10b981' } },
+
+  // Classify → Deep Code Analysis
+  { id: 'e-classify-dca-high', source: 'priority_classifier', target: 'deep_code_analyzer_high', animated: true, label: 'HIGH', style: { stroke: '#ef4444' }, labelStyle: { fill: '#ef4444', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#ef4444' } },
+  { id: 'e-classify-dca-medium', source: 'priority_classifier', target: 'deep_code_analyzer_medium', animated: true, label: 'MEDIUM', style: { stroke: '#f59e0b' }, labelStyle: { fill: '#f59e0b', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b' } },
+  { id: 'e-classify-dca-low', source: 'priority_classifier', target: 'deep_code_analyzer_low', animated: true, label: 'LOW', style: { stroke: '#10b981' }, labelStyle: { fill: '#10b981', fontWeight: 700, fontSize: 11 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#10b981' } },
+
+  // Deep Code Analysis → Solution Architect + Email
+  { id: 'e-dca-high-handler', source: 'deep_code_analyzer_high', target: 'high_priority_handler', animated: true, style: { stroke: '#8b5cf6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } },
+  { id: 'e-dca-medium-handler', source: 'deep_code_analyzer_medium', target: 'medium_priority_handler', animated: true, style: { stroke: '#8b5cf6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } },
+  { id: 'e-dca-low-handler', source: 'deep_code_analyzer_low', target: 'low_priority_handler', animated: true, style: { stroke: '#8b5cf6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } },
+
+  // Solution Architect → End
   { id: 'e-high-end', source: 'high_priority_handler', target: 'end_high', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
   { id: 'e-medium-end', source: 'medium_priority_handler', target: 'end_medium', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
   { id: 'e-low-end', source: 'low_priority_handler', target: 'end_low', style: { stroke: 'var(--border-default)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted)' } },
@@ -222,11 +280,18 @@ export default function WorkflowView() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const { currentNode, isPipelineRunning } = useAppStore();
 
+  // Node config modal state
+  const [selectedNode, setSelectedNode] = useState(null);
+
   // Update node statuses when pipeline runs
   useEffect(() => {
     if (!isPipelineRunning && !currentNode) return;
 
-    const nodeOrder = ['start', 'log_extractor', 'anomaly_detector', 'priority_classifier', 'high_priority_handler', 'medium_priority_handler', 'low_priority_handler'];
+    const nodeOrder = [
+      'start', 'log_extractor', 'anomaly_detector', 'priority_classifier',
+      'deep_code_analyzer_high', 'deep_code_analyzer_medium', 'deep_code_analyzer_low',
+      'high_priority_handler', 'medium_priority_handler', 'low_priority_handler',
+    ];
     const currentIdx = nodeOrder.indexOf(currentNode);
 
     setNodes((nds) =>
@@ -272,6 +337,14 @@ export default function WorkflowView() {
     return () => clearInterval(interval);
   }, [setNodes]);
 
+  // Handle node click → open config modal
+  const onNodeClick = useCallback((_event, node) => {
+    setSelectedNode({
+      id: node.id,
+      name: node.data.label,
+    });
+  }, []);
+
   return (
     <div className="page-content" style={{ padding: 0, paddingTop: 'var(--header-height)' }}>
       <div style={{ height: 'calc(100vh - var(--header-height))', width: '100%' }}>
@@ -280,6 +353,7 @@ export default function WorkflowView() {
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onNodeClick={onNodeClick}
           nodeTypes={nodeTypes}
           fitView
           fitViewOptions={{ padding: 0.3 }}
@@ -292,6 +366,15 @@ export default function WorkflowView() {
           <Background color="rgba(255,255,255,0.03)" gap={20} size={1} />
         </ReactFlow>
       </div>
+
+      {/* Node Config Modal */}
+      {selectedNode && (
+        <NodeConfigModal
+          nodeId={selectedNode.id}
+          nodeName={selectedNode.name}
+          onClose={() => setSelectedNode(null)}
+        />
+      )}
     </div>
   );
 }
