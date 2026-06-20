@@ -230,7 +230,7 @@ const initialNodes = [
     id: 'resolution_agent',
     type: 'workflowNode',
     position: { x: 350, y: 660 },
-    data: { label: 'Resolution Agent', subtitle: 'Agent 6: AI fix + runbook', icon: '💡', iconBg: 'rgba(59,130,246,0.2)', iconColor: '#3b82f6', status: 'idle', nodeId: 'resolution_agent' },
+    data: { label: 'Resolution Agent', subtitle: 'Agent 6: Auto fix + runbook', icon: '💡', iconBg: 'rgba(59,130,246,0.2)', iconColor: '#3b82f6', status: 'idle', nodeId: 'resolution_agent' },
   },
   {
     id: 'orchestrator_agent',

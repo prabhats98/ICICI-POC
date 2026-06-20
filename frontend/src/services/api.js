@@ -66,6 +66,7 @@ export const getNotificationHistory = (limit = 50) => api.get(`/api/analytics/no
 export const getTopIssues = (limit = 10) => api.get(`/api/analytics/top-issues?limit=${limit}`);
 export const getLogVolume = (days = 7) => api.get(`/api/analytics/log-volume?days=${days}`);
 export const getPipelineRuns = (limit = 20) => api.get(`/api/analytics/pipeline-runs?limit=${limit}`);
+export const getMTTR = () => api.get('/api/analytics/mttr');
 
 // --- WebSocket ---
 export const createWebSocket = () => {

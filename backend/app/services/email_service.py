@@ -26,6 +26,11 @@ class EmailService:
         self.from_email = settings.smtp_from_email
         self.default_to_email = settings.smtp_to_email
 
+    @property
+    def smtp_configured(self) -> bool:
+        """Check if SMTP credentials are properly configured."""
+        return bool(self.username and self.password and self.from_email)
+
     async def send_alert_email(
         self,
         subject: str,
@@ -46,11 +51,19 @@ class EmailService:
                 sent = await azure_notification_service.send_email(recipient, subject, html_body)
                 if sent:
                     return True
-                logger.warning("ACS failed, falling back to SMTP")
+                logger.warning("ACS failed, attempting SMTP fallback...")
             except Exception as e:
-                logger.warning(f"ACS unavailable ({e}), falling back to SMTP")
+                logger.warning(f"ACS unavailable ({e}), attempting SMTP fallback...")
 
         # SMTP (primary or fallback)
+        if not self.smtp_configured:
+            logger.error(
+                f"SMTP credentials not configured (SMTP_USERNAME, SMTP_PASSWORD, "
+                f"SMTP_FROM_EMAIL are required). Cannot send email to {recipient}. "
+                f"Subject: {subject}"
+            )
+            return False
+
         return await self._send_smtp(recipient, subject, html_body)
 
     async def _send_smtp(self, to_email: str, subject: str, html_body: str) -> bool:
@@ -75,6 +88,7 @@ class EmailService:
                 password=self.password,
                 use_tls=False,
                 start_tls=True,
+                timeout=15,
             )
             logger.info(f"SMTP email sent to {to_email}: {subject}")
             return True
@@ -91,3 +105,4 @@ class EmailService:
 
 # Singleton
 email_service = EmailService()
+

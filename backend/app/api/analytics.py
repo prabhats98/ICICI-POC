@@ -265,3 +265,37 @@ async def pipeline_runs(limit: int = Query(20, ge=1, le=100)):
             for r in runs
         ]
     }
+
+
+@router.get("/mttr")
+async def mean_time_to_resolution():
+    """Mean Time To Resolution overall and by priority."""
+    async with async_session() as session:
+        # Overall MTTR
+        overall = (await session.execute(
+            select(func.avg(Incident.resolution_duration_minutes))
+            .where(Incident.resolution_duration_minutes.isnot(None))
+        )).scalar()
+
+        # Per-priority MTTR
+        result = await session.execute(
+            select(
+                Incident.priority,
+                func.avg(Incident.resolution_duration_minutes).label("avg_minutes"),
+                func.count(Incident.id).label("resolved_count"),
+            )
+            .where(Incident.resolution_duration_minutes.isnot(None))
+            .group_by(Incident.priority)
+        )
+        rows = result.all()
+
+    return {
+        "overall_avg_minutes": round(overall, 1) if overall else None,
+        "by_priority": {
+            (r.priority.value if hasattr(r.priority, "value") else str(r.priority)): {
+                "avg_minutes": round(r.avg_minutes, 1) if r.avg_minutes else None,
+                "resolved_count": r.resolved_count,
+            }
+            for r in rows
+        },
+    }

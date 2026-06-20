@@ -275,59 +275,190 @@ Format in clear, actionable Markdown."""
 
         # Priority styling
         priority_color = {'P1': '#dc2626', 'P2': '#d97706', 'P3': '#059669'}.get(priority, '#6b7280')
-        priority_label = {'P1': '🔴 CRITICAL', 'P2': '🟡 WARNING', 'P3': '🟢 INFO'}.get(priority, priority)
+
+        # Build the solution into structured HTML sections
+        # Clean up markdown formatting from solution for email display
+        solution_clean = (solution or '').replace('**', '').replace('```', '').replace('# ', '').strip()
+        solution_paragraphs = [p.strip() for p in solution_clean.split('\n') if p.strip()]
+        solution_html_items = ''
+        for para in solution_paragraphs[:30]:
+            if para.startswith('- ') or para.startswith('* '):
+                solution_html_items += f'<li style="margin-bottom: 6px; color: #cbd5e1; line-height: 1.6;">{para[2:]}</li>\n'
+            elif para.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
+                solution_html_items += f'<li style="margin-bottom: 6px; color: #cbd5e1; line-height: 1.6;">{para[2:].strip()}</li>\n'
+            else:
+                solution_html_items += f'<p style="margin: 0 0 8px; color: #cbd5e1; line-height: 1.6;">{para}</p>\n'
+
+        if solution_html_items:
+            resolution_section = f'<ol style="margin: 0; padding-left: 20px;">{solution_html_items}</ol>'
+        else:
+            resolution_section = '<p style="margin: 0; color: #cbd5e1; line-height: 1.6;">Investigation in progress. Resolution details will be provided upon root cause identification.</p>'
+
+        # Severity context based on priority
+        if priority == 'P1':
+            severity_context = (
+                "This is a <strong>P1 Critical</strong> incident requiring immediate executive attention and full incident response mobilization. "
+                "The current situation poses a direct and severe threat to service availability, customer operations, "
+                "transaction integrity, and the institution's reputation. Core banking APIs, including those for fundamental "
+                "banking transactions and user authentication, are experiencing critical failures that are directly impacting "
+                "customer-facing operations. A P1 incident of this nature demands our immediate and undivided attention "
+                "to prevent further escalation, potential financial losses, regulatory implications, and cascading failures "
+                "across all integrated downstream systems. Immediate mobilization of the incident response team is mandatory."
+            )
+            header_label = '🔴 CRITICAL — Banking Infrastructure Alert'
+        elif priority == 'P2':
+            severity_context = (
+                "This is a <strong>P2 High Priority</strong> incident that demands urgent attention from the operations team. "
+                "The current situation is causing significant degradation to core banking services and severely affecting "
+                "customer experience and operational stability. Core banking APIs, including those for fundamental banking "
+                "transactions and user authentication, are experiencing extremely high latency. This is leading to a severely "
+                "degraded customer experience, making online banking slow and frustrating, and could result in transaction "
+                "failures or cascading issues across integrated systems. Continued inaction risks escalation to a full P1 "
+                "outage, potential transaction failures, and broader customer impact. A P2 incident of this nature demands "
+                "our immediate and undivided attention to prevent further escalation and potential financial impact."
+            )
+            header_label = '🟡 WARNING — Banking Infrastructure Alert'
+        else:
+            severity_context = (
+                "This is a <strong>P3 Informational</strong> incident logged for monitoring and awareness purposes. "
+                "While not immediately service-impacting, this event has been detected in the banking cloud infrastructure "
+                "and warrants proactive monitoring. If left unaddressed, it may evolve into a higher-severity issue during "
+                "peak traffic periods or under increased load conditions. Corrective action is recommended during the next "
+                "scheduled maintenance window to mitigate any potential risk of escalation and ensure continued operational stability."
+            )
+            header_label = '🟢 INFO — Banking Infrastructure Alert'
 
         subject = f"[{priority}] Banking Cloud Alert: {title}"
 
-        # Always build a rich fallback HTML — this is the guaranteed path
+        # Priority-specific opening paragraph
+        if priority == 'P1':
+            opening_paragraph = (
+                f'This email serves as an <strong>urgent notification</strong> regarding a critical '
+                f'<strong style="color: {priority_color};">{priority}</strong> incident impacting our core banking services. '
+                f'We are currently experiencing a <strong>critical production issue</strong> that is severely '
+                f'affecting service availability, customer operations, and transaction integrity. This situation '
+                f'requires immediate executive attention and full incident response mobilization.'
+            )
+            status_label = 'Root Cause Unknown — Emergency Response Activated'
+        elif priority == 'P2':
+            opening_paragraph = (
+                f'This email serves as an <strong>urgent notification</strong> regarding a critical '
+                f'<strong style="color: {priority_color};">{priority}</strong> incident impacting our core banking services. '
+                f'We are currently experiencing <strong>significant backend performance degradation</strong> that is '
+                f'severely affecting customer experience and operational stability.'
+            )
+            status_label = 'Root Cause Unknown — Active Investigation Underway'
+        else:
+            opening_paragraph = (
+                f'This email serves as a notification regarding a '
+                f'<strong style="color: {priority_color};">{priority}</strong> event detected in our banking cloud infrastructure. '
+                f'While not immediately service-impacting, this event has been flagged for monitoring and proactive review '
+                f'to ensure continued operational stability.'
+            )
+            status_label = 'Under Review — Monitoring Active'
+
+        # Build the comprehensive email HTML
         fallback_body = f"""
-        <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 12px; overflow: hidden;">
-          <div style="background: {priority_color}; padding: 20px 28px; display: flex; align-items: center; gap: 12px;">
-            <h1 style="margin: 0; font-size: 22px; color: #fff;">{priority_label} — Banking Infrastructure Alert</h1>
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 720px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 12px; overflow: hidden; border: 1px solid #1e293b;">
+          <!-- Header -->
+          <div style="background: {priority_color}; padding: 22px 28px;">
+            <h1 style="margin: 0; font-size: 21px; color: #fff; font-weight: 700;">{header_label}</h1>
           </div>
+
           <div style="padding: 28px;">
-            <h2 style="color: #f1f5f9; font-size: 18px; margin-bottom: 8px;">{title}</h2>
-            <div style="display: flex; gap: 16px; margin-bottom: 20px;">
-              <span style="background: rgba(255,255,255,0.1); border-radius: 6px; padding: 4px 12px; font-size: 13px;">📁 {category}</span>
-              <span style="background: rgba(255,255,255,0.1); border-radius: 6px; padding: 4px 12px; font-size: 13px;">☁️ {source_service}</span>
-              <span style="background: {priority_color}33; border: 1px solid {priority_color}; border-radius: 6px; padding: 4px 12px; font-size: 13px; color: {priority_color};">{priority}</span>
+            <!-- Salutation -->
+            <p style="color: #94a3b8; font-size: 14px; margin: 0 0 20px;">Dear Production Manager,</p>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.7; margin: 0 0 24px;">
+              {opening_paragraph}
+            </p>
+
+            <!-- Incident Title -->
+            <h2 style="color: #f1f5f9; font-size: 18px; margin: 0 0 12px; font-weight: 700;">{title}</h2>
+            <div style="display: flex; gap: 10px; margin-bottom: 24px; flex-wrap: wrap;">
+              <span style="background: rgba(255,255,255,0.08); border-radius: 6px; padding: 5px 14px; font-size: 13px; color: #94a3b8;">📁 {category}</span>
+              <span style="background: rgba(255,255,255,0.08); border-radius: 6px; padding: 5px 14px; font-size: 13px; color: #94a3b8;">☁️ {source_service}</span>
+              <span style="background: {priority_color}22; border: 1px solid {priority_color}; border-radius: 6px; padding: 5px 14px; font-size: 13px; color: {priority_color}; font-weight: 700;">{priority}</span>
             </div>
-            <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 16px; margin-bottom: 20px; border-left: 3px solid {priority_color};">
-              <h3 style="margin: 0 0 8px; color: #94a3b8; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Incident Description</h3>
-              <p style="margin: 0; color: #cbd5e1; line-height: 1.6;">{description}</p>
+
+            <!-- Incident Details Table -->
+            <div style="background: rgba(255,255,255,0.04); border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.06);">
+              <h3 style="margin: 0 0 14px; color: #f1f5f9; font-size: 14px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700;">Incident Details</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px 0; color: #64748b; font-size: 13px; font-weight: 600; width: 160px; vertical-align: top;">Incident Title:</td>
+                  <td style="padding: 8px 0; color: #e2e8f0; font-size: 13px;">{title}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #64748b; font-size: 13px; font-weight: 600; vertical-align: top;">Priority:</td>
+                  <td style="padding: 8px 0; color: {priority_color}; font-size: 13px; font-weight: 700;">{priority} - {'Critical' if priority == 'P1' else 'High' if priority == 'P2' else 'Informational'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #64748b; font-size: 13px; font-weight: 600; vertical-align: top;">Category:</td>
+                  <td style="padding: 8px 0; color: #e2e8f0; font-size: 13px;">{category}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #64748b; font-size: 13px; font-weight: 600; vertical-align: top;">Affected Services:</td>
+                  <td style="padding: 8px 0; color: #e2e8f0; font-size: 13px;">{source_service}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #64748b; font-size: 13px; font-weight: 600; vertical-align: top;">Current Status:</td>
+                  <td style="padding: 8px 0; color: #fbbf24; font-size: 13px; font-weight: 600;">{status_label}</td>
+                </tr>
+              </table>
             </div>
-            <div style="background: rgba(16,185,129,0.08); border-radius: 8px; padding: 16px; border-left: 3px solid #10b981;">
-              <h3 style="margin: 0 0 8px; color: #10b981; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">🛠 AI-Generated Resolution</h3>
-              <div style="color: #cbd5e1; line-height: 1.7; white-space: pre-wrap;">{solution[:2000]}</div>
+
+            <!-- Description -->
+            <div style="background: rgba(255,255,255,0.04); border-radius: 10px; padding: 20px; margin-bottom: 20px; border-left: 3px solid {priority_color};">
+              <h3 style="margin: 0 0 10px; color: {priority_color}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700;">Incident Description</h3>
+              <p style="margin: 0; color: #cbd5e1; line-height: 1.7; font-size: 14px;">{description}</p>
             </div>
-            <div style="margin-top: 24px; padding: 16px; background: rgba(99,102,241,0.1); border-radius: 8px; border: 1px solid rgba(99,102,241,0.3);">
-              <p style="margin: 0; color: #a5b4fc; font-size: 13px;">
-                ⚡ This alert was generated by the <strong>CloudGuard AI Pipeline</strong>.<br>
-                Please login to the dashboard at <strong>http://localhost:5173</strong> to view full incident details and update status.
+
+            <!-- Immediate Impact & Severity -->
+            <div style="background: rgba({','.join(str(int(priority_color[i:i+2], 16)) for i in (1, 3, 5))},0.06); border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid {priority_color}33;">
+              <h3 style="margin: 0 0 10px; color: {priority_color}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700;">⚠ Immediate Impact & Severity</h3>
+              <p style="margin: 0; color: #cbd5e1; line-height: 1.7; font-size: 14px;">
+                {severity_context}
               </p>
             </div>
+
+            <!-- Proposed Actions & Resolution Plan -->
+            <div style="background: rgba(16,185,129,0.06); border-radius: 10px; padding: 20px; margin-bottom: 20px; border-left: 3px solid #10b981;">
+              <h3 style="margin: 0 0 14px; color: #10b981; font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700;">🛠 Proposed Immediate Actions & Resolution Plan</h3>
+              <p style="margin: 0 0 12px; color: #94a3b8; font-size: 13px; font-style: italic;">
+                As a Senior Azure Cloud Solutions Architect, the following immediate actions and a structured approach to resolution are recommended:
+              </p>
+              {resolution_section}
+            </div>
+
+            <!-- Next Steps -->
+            <div style="background: rgba(99,102,241,0.06); border-radius: 10px; padding: 20px; margin-bottom: 20px; border-left: 3px solid #6366f1;">
+              <h3 style="margin: 0 0 10px; color: #818cf8; font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700;">📋 Next Steps</h3>
+              <p style="margin: 0 0 12px; color: #cbd5e1; line-height: 1.7; font-size: 14px;">
+                The technical team is ready to lead the diagnostic efforts and coordinate with the relevant teams. 
+                We urge your immediate approval to proceed with these actions and to mobilize the necessary resources.
+                Please advise on the best way to proceed and who should be involved from your team.
+              </p>
+              <p style="margin: 0; color: #cbd5e1; line-height: 1.7; font-size: 14px;">
+                Please login to the CloudGuard dashboard at <strong style="color: #818cf8;">http://localhost:5173</strong> to view 
+                full incident details, review the complete resolution runbook, update incident status, and track resolution progress in real time.
+              </p>
+            </div>
+
+            <!-- Sign-off -->
+            <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.06);">
+              <p style="margin: 0 0 4px; color: #94a3b8; font-size: 13px;">Thank you for your immediate attention to this critical matter.</p>
+              <p style="margin: 16px 0 4px; color: #cbd5e1; font-size: 13px;">Sincerely,</p>
+              <p style="margin: 0 0 2px; color: #f1f5f9; font-size: 14px; font-weight: 700;">CloudGuard Incident Response Team</p>
+              <p style="margin: 0; color: #64748b; font-size: 12px;">Senior Azure Cloud Solutions Architect</p>
+            </div>
           </div>
-          <div style="padding: 16px 28px; background: rgba(0,0,0,0.3); text-align: center;">
-            <p style="margin: 0; color: #64748b; font-size: 12px;">Banking Log Analyser · Azure Incident Pipeline · Powered by Gemini AI</p>
+
+          <!-- Footer -->
+          <div style="padding: 16px 28px; background: rgba(0,0,0,0.3); text-align: center; border-top: 1px solid rgba(255,255,255,0.04);">
+            <p style="margin: 0; color: #475569; font-size: 11px;">Banking Cloud Log Analyser · CloudGuard Automated Incident Pipeline</p>
           </div>
         </div>
         """
-
-        # Try to get an enriched subject from Gemini (lightweight call, text only)
-        try:
-            prompt = f"""Write a concise, urgent email subject line (max 80 chars) for a banking infrastructure alert.
-Priority: {priority} | Incident: {title} | Category: {category}
-Return ONLY the subject line text, nothing else."""
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=GenerateContentConfig(temperature=0.1, max_output_tokens=100),
-            )
-            enriched_subject = response.text.strip().strip('"').strip("'")
-            if enriched_subject and len(enriched_subject) < 120:
-                subject = enriched_subject
-        except Exception:
-            pass  # Keep fallback subject
 
         return {"subject": subject, "body": fallback_body}
 

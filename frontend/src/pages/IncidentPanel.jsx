@@ -157,13 +157,13 @@ export default function IncidentPanel() {
                 }}>
                   {inc.ai_analysis && (
                     <div style={{ marginBottom: 16 }}>
-                      <h4 style={{ fontSize: 13, color: 'var(--accent-indigo-light)', marginBottom: 8 }}>🤖 AI Classification</h4>
+                      <h4 style={{ fontSize: 13, color: 'var(--accent-indigo-light)', marginBottom: 8 }}>🔍 Incident Classification</h4>
                       <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{inc.ai_analysis}</p>
                     </div>
                   )}
                   {inc.ai_solution && (
                     <div style={{ marginBottom: 16 }}>
-                      <h4 style={{ fontSize: 13, color: 'var(--accent-emerald)', marginBottom: 8 }}>💡 AI Resolution</h4>
+                      <h4 style={{ fontSize: 13, color: 'var(--accent-emerald)', marginBottom: 8 }}>💡 Recommended Resolution</h4>
                       <pre style={{
                         fontSize: 12,
                         color: 'var(--text-secondary)',
