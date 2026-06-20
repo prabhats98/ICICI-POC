@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import WorkflowView from './pages/WorkflowView';
 import LogExplorer from './pages/LogExplorer';
 import IncidentPanel from './pages/IncidentPanel';
+import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import useWebSocket from './hooks/useWebSocket';
 
@@ -27,6 +28,7 @@ function App() {
             <Route path="/workflow" element={<WorkflowView />} />
             <Route path="/logs" element={<LogExplorer />} />
             <Route path="/incidents" element={<IncidentPanel />} />
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>

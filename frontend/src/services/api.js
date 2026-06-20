@@ -49,6 +49,24 @@ export const updateNodeConfig = (nodeId, params) => api.put(`/api/workflow/nodes
 export const exportLogs = (format = 'json') => api.get(`/api/export/logs?format=${format}`, { responseType: 'blob' });
 export const exportIncidents = (format = 'json') => api.get(`/api/export/incidents?format=${format}`, { responseType: 'blob' });
 
+// --- Ingest / Simulate ---
+export const simulateLogs = (data = {}) => api.post('/api/ingest/simulate', {
+  count: 60,
+  spread_minutes: 30,
+  trigger_pipeline: true,
+  ...data,
+});
+export const ingestStats = () => api.get('/api/ingest/stats');
+
+// --- Analytics ---
+export const getIncidentTrend = (days = 7) => api.get(`/api/analytics/incident-trend?days=${days}`);
+export const getServiceBreakdown = () => api.get('/api/analytics/service-breakdown');
+export const getErrorDistribution = () => api.get('/api/analytics/error-distribution');
+export const getNotificationHistory = (limit = 50) => api.get(`/api/analytics/notification-history?limit=${limit}`);
+export const getTopIssues = (limit = 10) => api.get(`/api/analytics/top-issues?limit=${limit}`);
+export const getLogVolume = (days = 7) => api.get(`/api/analytics/log-volume?days=${days}`);
+export const getPipelineRuns = (limit = 20) => api.get(`/api/analytics/pipeline-runs?limit=${limit}`);
+
 // --- WebSocket ---
 export const createWebSocket = () => {
   const ws = new WebSocket('ws://localhost:8000/ws/pipeline');

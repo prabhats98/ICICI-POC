@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     azure_apim_resource_id: str = ""
     azure_vm_resource_id: str = ""
     azure_log_analytics_workspace_id: str = ""
+    # Deployed resource endpoints (informational)
+    azure_appservice_url: str = ""
+    azure_apim_gateway_url: str = ""
+    azure_appgw_public_ip: str = ""
+    azure_appgw_dns: str = ""
 
     # --- GCP / Vertex AI ---
     google_application_credentials: str = "../service-account-key.json"

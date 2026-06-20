@@ -70,39 +70,42 @@ class AzureLogService:
 
     async def collect_frontdoor_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
         """Pull Azure Front Door logs: requests, WAF events, routing, latency, 4xx/5xx."""
-        kql = f"""
-AzureDiagnostics
+        kql = f"""AzureDiagnostics
 | where TimeGenerated > ago({hours_back}h)
 | where ResourceProvider == "MICROSOFT.CDN" or ResourceProvider == "MICROSOFT.NETWORK"
 | where Category in ("FrontDoorAccessLog", "FrontDoorHealthProbeLog", "FrontDoorWebApplicationFirewallLog")
-| project TimeGenerated, Level, Category, OperationName, ResourceId,
-          httpStatusCode_d, requestUri_s, clientIp_s, timeTaken_d,
-          action_s, ruleName_s, host_s, errorInfo_s, ResultDescription
+| extend Level = column_ifexists("Level", "Information")
 | order by TimeGenerated desc
-| limit 500
-"""
+| limit 500"""
         try:
             rows = await self._query_log_analytics(kql)
             logger.info(f"Log Collector: Collected {len(rows)} Front Door logs")
             return self._normalize_rows(rows, "azure-front-door", "Azure Front Door")
         except Exception as e:
-            logger.error(f"Front Door log collection failed: {e}")
+            logger.warning(f"Front Door log collection skipped: {e}")
             return []
 
     async def collect_appgateway_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
         """Pull Application Gateway logs: access, performance, firewall, health probes."""
-        kql = f"""
-AzureDiagnostics
+        kql = f"""AzureDiagnostics
 | where TimeGenerated > ago({hours_back}h)
 | where ResourceProvider == "MICROSOFT.NETWORK"
-| where Category in ("ApplicationGatewayAccessLog", "ApplicationGatewayPerformanceLog",
-                      "ApplicationGatewayFirewallLog")
+| where Category in ("ApplicationGatewayAccessLog", "ApplicationGatewayPerformanceLog", "ApplicationGatewayFirewallLog")
+| extend httpStat = column_ifexists("httpStatus_d", 0.0)
+| extend srvStat  = column_ifexists("serverStatus_d", 0.0)
+| extend StatusCode = toint(iff(httpStat > 0, httpStat, srvStat))
+| extend Level = iff(StatusCode >= 500, "Error", iff(StatusCode >= 400, "Warning", "Information"))
+| extend host_s       = column_ifexists("host_s", "")
+| extend requestUri_s = column_ifexists("requestUri_s", "")
+| extend clientIP_s   = column_ifexists("clientIP_s", "")
+| extend timeTaken_d  = column_ifexists("timeTaken_d", 0.0)
+| extend instanceId_s = column_ifexists("instanceId_s", "")
 | project TimeGenerated, Level, Category, OperationName, ResourceId,
-          httpStatus_d, serverStatus_d, timeTaken_d, host_s, requestUri_s,
-          clientIP_s, serverRouted_s, instanceId_s, ResultDescription
+          httpStatus_d = httpStat, serverStatus_d = srvStat, timeTaken_d,
+          host_s, requestUri_s, clientIP_s, instanceId_s,
+          ResultDescription = tostring(StatusCode)
 | order by TimeGenerated desc
-| limit 500
-"""
+| limit 500"""
         try:
             rows = await self._query_log_analytics(kql)
             logger.info(f"Log Collector: Collected {len(rows)} App Gateway logs")
@@ -113,23 +116,32 @@ AzureDiagnostics
 
     async def collect_apim_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
         """Pull API Management logs: gateway, backend responses, policy failures."""
-        kql = f"""
-AzureDiagnostics
+        # ApiManagementGatewayLogs dedicated table (Consumption tier)
+        kql_dedicated = f"""ApiManagementGatewayLogs
+| where TimeGenerated > ago({hours_back}h)
+| extend Level = iff(ResponseCode >= 500, "Error", iff(ResponseCode >= 400, "Warning", "Information"))
+| order by TimeGenerated desc
+| limit 500"""
+        # Fallback: AzureDiagnostics
+        kql_diag = f"""AzureDiagnostics
 | where TimeGenerated > ago({hours_back}h)
 | where ResourceProvider == "MICROSOFT.APIMANAGEMENT"
 | where Category in ("GatewayLogs")
-| project TimeGenerated, Level, Category, OperationName, ResourceId,
-          responseCode_d, method_s, url_s, cache_s, apiId_s,
-          backendResponseCode_d, backendTime_d, clientTime_d, ResultDescription
+| extend Level = column_ifexists("Level", "Information")
 | order by TimeGenerated desc
-| limit 500
-"""
+| limit 500"""
         try:
-            rows = await self._query_log_analytics(kql)
+            rows = []
+            try:
+                rows = await self._query_log_analytics(kql_dedicated)
+            except Exception:
+                pass
+            if not rows:
+                rows = await self._query_log_analytics(kql_diag)
             logger.info(f"Log Collector: Collected {len(rows)} APIM logs")
             return self._normalize_rows(rows, "azure-apim", "Azure API Management")
         except Exception as e:
-            logger.error(f"APIM log collection failed: {e}")
+            logger.warning(f"APIM log collection skipped: {e}")
             return []
 
     async def collect_vm_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
@@ -162,22 +174,46 @@ syslog
             logger.error(f"VM log collection failed: {e}")
             return []
 
-    async def collect_all(self, hours_back: int = 6) -> dict[str, list[dict[str, Any]]]:
-        """Collect logs from all configured Azure sources."""
+    async def collect_all(self, hours_back: int = 1) -> dict[str, list[dict[str, Any]]]:
+        """Collect logs from all Azure sources via Log Analytics KQL.
+        
+        Always runs all queries regardless of whether resource IDs are set —
+        the workspace ID alone is sufficient for KQL. Returns real logs only.
+        """
         results = {}
-        sources = settings.azure_log_source_ids
 
-        if "azure-front-door" in sources:
-            results["azure-front-door"] = await self.collect_frontdoor_logs(hours_back)
-        if "azure-app-gateway" in sources:
-            results["azure-app-gateway"] = await self.collect_appgateway_logs(hours_back)
-        if "azure-apim" in sources:
-            results["azure-apim"] = await self.collect_apim_logs(hours_back)
-        if "azure-vm" in sources:
-            results["azure-vm"] = await self.collect_vm_logs(hours_back)
+        if not settings.azure_log_analytics_workspace_id:
+            logger.warning("Log Collector: AZURE_LOG_ANALYTICS_WORKSPACE_ID not set — skipping collection")
+            return results
+
+        # Always collect from all 4 sources — KQL filters by resource type, not ID
+        logger.info(f"Log Collector: Querying Log Analytics for last {hours_back}h of logs")
+
+        frontdoor_logs = await self.collect_frontdoor_logs(hours_back)
+        if frontdoor_logs:
+            results["azure-front-door"] = frontdoor_logs
+
+        appgw_logs = await self.collect_appgateway_logs(hours_back)
+        if appgw_logs:
+            results["azure-app-gateway"] = appgw_logs
+
+        apim_logs = await self.collect_apim_logs(hours_back)
+        if apim_logs:
+            results["azure-apim"] = apim_logs
+
+        vm_logs = await self.collect_vm_logs(hours_back)
+        if vm_logs:
+            results["azure-vm"] = vm_logs
 
         total = sum(len(v) for v in results.values())
-        logger.info(f"Log Collector: Total collected = {total} logs from {len(results)} sources")
+        if total > 0:
+            logger.info(
+                f"Log Collector: Collected {total} real Azure logs from {len(results)} sources — "
+                + ", ".join(f"{k}: {len(v)}" for k, v in results.items())
+            )
+        else:
+            logger.info("Log Collector: No real logs found in Log Analytics yet — waiting for traffic")
+
         return results
 
     def _normalize_rows(

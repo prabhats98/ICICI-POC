@@ -44,3 +44,13 @@ backend/alembic/versions/*.pyc
 # Logs
 *.log
 logs/
+
+# SQLite WAL/SHM
+*.db-shm
+*.db-wal
+
+# Zip artifacts
+*.zip
+
+# Scripts output
+backend/scripts/__pycache__/

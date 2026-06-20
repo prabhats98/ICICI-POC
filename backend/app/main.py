@@ -19,6 +19,8 @@ from app.api.export import router as export_router
 from app.api.websocket import router as ws_router, broadcast_event
 from app.api.node_config import router as node_config_router
 from app.api.pipeline import router as pipeline_router
+from app.api.ingest import router as ingest_router
+from app.api.analytics import router as analytics_router
 from app.services.scheduler_service import start_scheduler, stop_scheduler
 from app.agents.graph import set_broadcast_callback
 
@@ -71,6 +73,8 @@ app.include_router(export_router)
 app.include_router(ws_router)
 app.include_router(node_config_router)
 app.include_router(pipeline_router)
+app.include_router(ingest_router)
+app.include_router(analytics_router)
 
 
 @app.get("/", tags=["Health"])
@@ -85,7 +89,7 @@ async def root():
 
 @app.get("/api/dashboard", tags=["Dashboard"])
 async def dashboard_summary():
-    """Combined dashboard summary with P1/P2/P3 counts, resolution metrics."""
+    """Combined dashboard summary with P1/P2/P3 counts, resolution metrics, service breakdown."""
     from sqlalchemy import select, func, desc
     from app.database import async_session
     from app.models.raw_log import RawLog
@@ -107,6 +111,13 @@ async def dashboard_summary():
             select(func.count(CloudLog.id)).where(CloudLog.level.in_(["ERROR", "CRITICAL"]))
         )).scalar() or 0
 
+        # Log level breakdown
+        level_result = await session.execute(
+            select(CloudLog.level, func.count(CloudLog.id).label("count"))
+            .group_by(CloudLog.level)
+        )
+        log_levels = {r.level: r.count for r in level_result.all()}
+
         # Incident stats
         total_incidents = (await session.execute(select(func.count(Incident.id)))).scalar() or 0
         open_incidents = (await session.execute(
@@ -123,6 +134,19 @@ async def dashboard_summary():
         )).scalar() or 0
         p3_count = (await session.execute(
             select(func.count(Incident.id)).where(Incident.priority == PriorityLevel.P3)
+        )).scalar() or 0
+
+        # Service-wise incident counts
+        svc_result = await session.execute(
+            select(Incident.source_service, func.count(Incident.id).label("count"))
+            .where(Incident.source_service.isnot(None))
+            .group_by(Incident.source_service)
+        )
+        service_counts = {r.source_service: r.count for r in svc_result.all()}
+
+        # Notifications sent
+        emails_sent = (await session.execute(
+            select(func.count(Incident.id)).where(Incident.email_sent == True)
         )).scalar() or 0
 
         # Avg resolution time
@@ -146,6 +170,7 @@ async def dashboard_summary():
         "logs": {
             "total": total_logs,
             "errors": error_logs,
+            "by_level": log_levels,
         },
         "incidents": {
             "total": total_incidents,
@@ -154,7 +179,9 @@ async def dashboard_summary():
             "p1": p1_count,
             "p2": p2_count,
             "p3": p3_count,
+            "emails_sent": emails_sent,
             "avg_resolution_minutes": round(avg_resolution, 1) if avg_resolution else None,
+            "by_service": service_counts,
         },
         "pipeline": {
             "total_runs": total_runs,
@@ -166,3 +193,4 @@ async def dashboard_summary():
             "next_run_at": str(get_next_run_time()) if get_next_run_time() else None,
         },
     }
+

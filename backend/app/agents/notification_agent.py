@@ -6,6 +6,7 @@ P1 → immediate email, P2 → email digest, P3 → dashboard only.
 """
 
 import logging
+import asyncio
 from typing import Any
 from datetime import datetime
 
@@ -67,6 +68,7 @@ async def notification_agent_node(state: PipelineState) -> dict[str, Any]:
             )
 
             incident_id = notification["incident_id"]
+            recipient = getattr(settings, 'azure_communication_email_to', None) or settings.smtp_to_email or 'prabhat.s@krelixir.com'
 
             # Update incident record
             try:
@@ -77,7 +79,7 @@ async def notification_agent_node(state: PipelineState) -> dict[str, Any]:
                         .values(
                             email_sent=sent,
                             email_sent_at=datetime.utcnow() if sent else None,
-                            email_recipient=settings.smtp_to_email,
+                            email_recipient=recipient,
                         )
                     )
                     await session.commit()
@@ -90,6 +92,9 @@ async def notification_agent_node(state: PipelineState) -> dict[str, Any]:
             else:
                 email_failures.append(incident_id)
                 logger.warning(f"Agent 8 [Notification]: Email failed for {incident_id}")
+
+            # Respect ACS free-tier rate limit: 1 email / 3 seconds
+            await asyncio.sleep(3)
 
         except Exception as e:
             logger.error(f"Agent 8 [Notification] failed for {notification.get('title')}: {e}")

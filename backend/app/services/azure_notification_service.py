@@ -39,35 +39,47 @@ class AzureNotificationService:
     ) -> bool:
         """
         Send an email via Azure Communication Services.
-
+        Retries up to 3 times on 429 TooManyRequests with exponential backoff.
         Returns True if sent successfully.
         """
-        try:
-            message = {
-                "senderAddress": settings.azure_communication_sender,
-                "recipients": {
-                    "to": [{"address": to_email}],
-                },
-                "content": {
-                    "subject": subject,
-                    "html": html_body,
-                },
-            }
+        import asyncio
 
-            poller = self.client.begin_send(message)
-            result = poller.result()
-            status = result.get("status", "Unknown")
+        message = {
+            "senderAddress": settings.azure_communication_sender,
+            "recipients": {
+                "to": [{"address": to_email}],
+            },
+            "content": {
+                "subject": subject,
+                "html": html_body,
+            },
+        }
 
-            if status == "Succeeded":
-                logger.info(f"ACS email sent to {to_email}: {subject}")
-                return True
-            else:
-                logger.warning(f"ACS email status {status} for {to_email}: {subject}")
+        for attempt in range(3):
+            try:
+                poller = self.client.begin_send(message)
+                result = poller.result()
+                status = result.get("status", "Unknown")
+
+                if status == "Succeeded":
+                    logger.info(f"ACS email sent to {to_email}: {subject}")
+                    return True
+                else:
+                    logger.warning(f"ACS email status {status} for {to_email}: {subject}")
+                    return False
+
+            except Exception as e:
+                err_str = str(e)
+                if "TooManyRequests" in err_str or "429" in err_str:
+                    wait = 2 ** (attempt + 1)   # 2s, 4s, 8s
+                    logger.warning(f"ACS rate limited (attempt {attempt+1}/3), retrying in {wait}s…")
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error(f"ACS email failed to {to_email}: {e}")
                 return False
 
-        except Exception as e:
-            logger.error(f"ACS email failed to {to_email}: {e}")
-            return False
+        logger.error(f"ACS email permanently failed after 3 attempts: {subject}")
+        return False
 
 
 # Singleton

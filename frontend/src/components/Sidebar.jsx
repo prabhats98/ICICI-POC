@@ -40,12 +40,17 @@ export default function Sidebar() {
           Incidents
           {p1Count > 0 && <span className="nav-badge">{p1Count}</span>}
         </NavLink>
+        <NavLink to="/analytics" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <span className="nav-icon">📈</span>
+          Analytics
+        </NavLink>
 
         <div className="sidebar-section-label">System</div>
         <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <span className="nav-icon">⚙️</span>
           Settings
         </NavLink>
+
 
         <div style={{ flex: 1 }} />
 
