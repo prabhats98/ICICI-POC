@@ -67,6 +67,11 @@ export const getTopIssues = (limit = 10) => api.get(`/api/analytics/top-issues?l
 export const getLogVolume = (days = 7) => api.get(`/api/analytics/log-volume?days=${days}`);
 export const getPipelineRuns = (limit = 20) => api.get(`/api/analytics/pipeline-runs?limit=${limit}`);
 export const getMTTR = () => api.get('/api/analytics/mttr');
+export const getGoldenSignals = () => api.get('/api/analytics/golden-signals');
+export const getSystemHealth = () => api.get('/api/analytics/system-health');
+export const getSLOStatus = () => api.get('/api/analytics/slo-status');
+export const getServiceUptime = (days = 30) => api.get(`/api/analytics/service-uptime?days=${days}`);
+export const getKPITrends = (days = 7) => api.get(`/api/analytics/kpi-trends?days=${days}`);
 
 // --- WebSocket ---
 export const createWebSocket = () => {

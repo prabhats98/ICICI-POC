@@ -1,8 +1,11 @@
 /**
- * Dashboard Page — Enterprise-grade Grafana-inspired observability dashboard.
- * Features KPI stat cards, stacked area charts, doughnut charts, horizontal
- * bar charts, live incident feed, and pipeline run history — all wrapped in
- * Grafana-style panel chrome with dark theme.
+ * Dashboard Page — FAANG-level Enterprise Observability Command Center.
+ * Features: AI Insight Banner, System Health Gauge, Golden Signals (SRE),
+ * Enhanced KPI cards with sparklines & animated counters, SLO/Error Budget
+ * widget, MTTR breakdown gauges, Incident Trend & Error Distribution charts,
+ * Log Volume chart, Service Uptime Heatmap, Incident Timeline,
+ * Pipeline Health Ring, Top Recurring Issues, Live Incident Feed,
+ * and Pipeline Run History.
  */
 
 import { useEffect, useState, useCallback } from 'react';
@@ -18,15 +21,32 @@ import {
   getServiceBreakdown,
   getTopIssues,
   getMTTR,
+  getGoldenSignals,
+  getSystemHealth,
+  getSLOStatus,
+  getServiceUptime,
+  getKPITrends,
 } from '../services/api';
 import useAppStore from '../store/useAppStore';
 
+// Chart components
 import GrafanaPanel from '../components/charts/GrafanaPanel';
 import IncidentTrendChart from '../components/charts/IncidentTrendChart';
 import LogVolumeChart from '../components/charts/LogVolumeChart';
 import ErrorDistributionChart from '../components/charts/ErrorDistributionChart';
-import ServiceHealthChart from '../components/charts/ServiceHealthChart';
 import TopIssuesChart from '../components/charts/TopIssuesChart';
+
+// NEW enterprise components
+import AIInsightBanner from '../components/charts/AIInsightBanner';
+import SystemHealthGauge from '../components/charts/SystemHealthGauge';
+import GoldenSignalsRow from '../components/charts/GoldenSignalsRow';
+import AnimatedCounter from '../components/charts/AnimatedCounter';
+import SparklineChart from '../components/charts/SparklineChart';
+import SLOWidget from '../components/charts/SLOWidget';
+import MTTRGauge from '../components/charts/MTTRGauge';
+import ServiceUptimeHeatmap from '../components/charts/ServiceUptimeHeatmap';
+import IncidentTimeline from '../components/charts/IncidentTimeline';
+import PipelineHealthRing from '../components/charts/PipelineHealthRing';
 
 const SERVICE_LABELS = {
   'azure-front-door': { label: 'Front Door', icon: '🌐', color: '#6366f1' },
@@ -43,16 +63,21 @@ export default function Dashboard() {
   const [recentRuns, setRecentRuns] = useState([]);
   const [running, setRunning] = useState(false);
   const [toggling, setToggling] = useState(false);
-  const [simResult, setSimResult] = useState(null);
   const [lastLogAt, setLastLogAt] = useState(null);
 
-  // Chart data state
+  // Existing chart data
   const [trendData, setTrendData] = useState([]);
   const [logVolumeData, setLogVolumeData] = useState([]);
   const [errorDist, setErrorDist] = useState({ distribution: [], total: 0 });
-  const [serviceData, setServiceData] = useState([]);
   const [topIssuesData, setTopIssuesData] = useState([]);
   const [mttrData, setMttrData] = useState(null);
+
+  // NEW enterprise data
+  const [goldenSignals, setGoldenSignals] = useState(null);
+  const [healthData, setHealthData] = useState(null);
+  const [sloData, setSloData] = useState(null);
+  const [uptimeData, setUptimeData] = useState(null);
+  const [kpiTrends, setKpiTrends] = useState([]);
 
   // Time range selectors
   const [trendRange, setTrendRange] = useState('7d');
@@ -68,14 +93,13 @@ export default function Dashboard() {
     try {
       const [dashRes, incRes, runRes] = await Promise.all([
         getDashboardSummary(),
-        getIncidents({ page_size: 8 }),
-        getAgentHistory({ page_size: 5 }),
+        getIncidents({ page_size: 12 }),
+        getAgentHistory({ page_size: 10 }),
       ]);
       setDashboard(dashRes.data);
       setPipelineEnabled(dashRes.data?.pipeline?.enabled ?? true);
       setRecentIncidents(incRes.data.items || []);
       setRecentRuns(runRes.data.items || []);
-      // Track last log ingested time
       const items = incRes.data.items || [];
       if (items.length > 0) setLastLogAt(items[0].created_at || items[0].updated_at);
     } catch (err) {
@@ -85,22 +109,31 @@ export default function Dashboard() {
 
   const loadCharts = useCallback(async () => {
     try {
-      const [trendRes, logVolRes, errDistRes, svcRes, topRes, mttrRes] =
-        await Promise.allSettled([
-          getIncidentTrend(parseDays(trendRange)),
-          getLogVolume(parseDays(logVolumeRange)),
-          getErrorDistribution(),
-          getServiceBreakdown(),
-          getTopIssues(10),
-          getMTTR(),
-        ]);
+      const results = await Promise.allSettled([
+        getIncidentTrend(parseDays(trendRange)),
+        getLogVolume(parseDays(logVolumeRange)),
+        getErrorDistribution(),
+        getTopIssues(10),
+        getMTTR(),
+        getGoldenSignals(),
+        getSystemHealth(),
+        getSLOStatus(),
+        getServiceUptime(30),
+        getKPITrends(7),
+      ]);
+
+      const [trendRes, logVolRes, errDistRes, topRes, mttrRes, gsRes, healthRes, sloRes, uptimeRes, kpiRes] = results;
 
       if (trendRes.status === 'fulfilled') setTrendData(trendRes.value.data.data || []);
       if (logVolRes.status === 'fulfilled') setLogVolumeData(logVolRes.value.data.data || []);
       if (errDistRes.status === 'fulfilled') setErrorDist(errDistRes.value.data || { distribution: [], total: 0 });
-      if (svcRes.status === 'fulfilled') setServiceData(svcRes.value.data.services || []);
       if (topRes.status === 'fulfilled') setTopIssuesData(topRes.value.data.top_issues || []);
       if (mttrRes.status === 'fulfilled') setMttrData(mttrRes.value.data);
+      if (gsRes.status === 'fulfilled') setGoldenSignals(gsRes.value.data);
+      if (healthRes.status === 'fulfilled') setHealthData(healthRes.value.data);
+      if (sloRes.status === 'fulfilled') setSloData(sloRes.value.data);
+      if (uptimeRes.status === 'fulfilled') setUptimeData(uptimeRes.value.data);
+      if (kpiRes.status === 'fulfilled') setKpiTrends(kpiRes.value.data.data || []);
     } catch (err) {
       console.error('Charts load error:', err);
     } finally {
@@ -118,14 +151,12 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [loadDashboard, loadCharts]);
 
-  // Reload trend chart on range change
   useEffect(() => {
     getIncidentTrend(parseDays(trendRange))
       .then((res) => setTrendData(res.data.data || []))
       .catch(console.error);
   }, [trendRange]);
 
-  // Reload log volume on range change
   useEffect(() => {
     getLogVolume(parseDays(logVolumeRange))
       .then((res) => setLogVolumeData(res.data.data || []))
@@ -169,21 +200,30 @@ export default function Dashboard() {
     return map[p] || 'low';
   };
 
-  // KPI data
+  // KPI data with sparkline trends
   const mttrValue = mttrData?.overall_avg_minutes
     ? `${Math.round(mttrData.overall_avg_minutes)}m`
     : '—';
 
   const kpiCards = [
-    { label: 'Total Incidents', value: dashboard?.incidents?.total || 0, icon: '📋', color: 'cyan' },
-    { label: 'Open', value: dashboard?.incidents?.open || 0, icon: '⚠️', color: 'amber' },
-    { label: 'P1 Critical', value: dashboard?.incidents?.p1 || 0, icon: '🔴', color: 'rose' },
-    { label: 'P2 Warning', value: dashboard?.incidents?.p2 || 0, icon: '🟡', color: 'amber' },
-    { label: 'P3 Info', value: dashboard?.incidents?.p3 || 0, icon: '🟢', color: 'emerald' },
-    { label: 'Resolved', value: dashboard?.incidents?.resolved || 0, icon: '✅', color: 'emerald' },
+    { label: 'Total Incidents', value: dashboard?.incidents?.total || 0, icon: '📋', color: 'cyan', trendKey: 'total' },
+    { label: 'Open', value: dashboard?.incidents?.open || 0, icon: '⚠️', color: 'amber', trendKey: 'open' },
+    { label: 'P1 Critical', value: dashboard?.incidents?.p1 || 0, icon: '🔴', color: 'rose', trendKey: 'P1' },
+    { label: 'P2 Warning', value: dashboard?.incidents?.p2 || 0, icon: '🟡', color: 'amber', trendKey: 'P2' },
+    { label: 'P3 Info', value: dashboard?.incidents?.p3 || 0, icon: '🟢', color: 'emerald', trendKey: 'P3' },
+    { label: 'Resolved', value: dashboard?.incidents?.resolved || 0, icon: '✅', color: 'emerald', trendKey: 'resolved' },
     { label: 'Avg MTTR', value: mttrValue, icon: '⏱️', color: 'violet', isText: true },
-    { label: 'Pipeline Runs', value: dashboard?.pipeline?.total_runs || 0, icon: '🔄', color: 'blue' },
+    { label: 'Pipeline Runs', value: dashboard?.pipeline?.total_runs || 0, icon: '🔄', color: 'blue', trendKey: 'pipeline_runs' },
   ];
+
+  // Compute delta % for KPI cards
+  const getDelta = (key) => {
+    if (!kpiTrends || kpiTrends.length < 2) return null;
+    const today = kpiTrends[kpiTrends.length - 1]?.[key] || 0;
+    const yesterday = kpiTrends[kpiTrends.length - 2]?.[key] || 0;
+    if (yesterday === 0) return today > 0 ? 100 : 0;
+    return Math.round(((today - yesterday) / yesterday) * 100);
+  };
 
   return (
     <div className="page-content">
@@ -208,7 +248,6 @@ export default function Dashboard() {
             </span>
           </div>
 
-          {/* Last log received */}
           {lastLogAt && (
             <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
               Last log: {formatDate(lastLogAt)}
@@ -249,43 +288,90 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Simulate Result Banner */}
-      {simResult && (
-        <div style={{
-          background: simResult.error ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
-          border: `1px solid ${simResult.error ? '#ef4444' : '#10b981'}`,
-          borderRadius: 10, padding: '12px 20px', marginBottom: 20,
-          color: simResult.error ? '#ef4444' : '#10b981',
-          animation: 'slideIn 0.3s ease',
-        }}>
-          {simResult.error ? (
-            `❌ ${simResult.error}`
-          ) : (
-            `✅ ${simResult.message} — Front Door: ${simResult.per_source?.['azure-front-door'] || 0}, App Gateway: ${simResult.per_source?.['azure-app-gateway'] || 0}, APIM: ${simResult.per_source?.['azure-apim'] || 0}`
-          )}
-        </div>
-      )}
-
-      {/* ── Row 1: KPI Stat Cards ── */}
-      <div className="grafana-kpi-grid animate-in">
-        {kpiCards.map((kpi, i) => (
-          <div
-            key={kpi.label}
-            className={`grafana-kpi-card kpi-${kpi.color} animate-in animate-in-delay-${(i % 4) + 1}`}
-          >
-            <div className="grafana-kpi-header">
-              <span className="grafana-kpi-label">{kpi.label}</span>
-              <span className="grafana-kpi-icon">{kpi.icon}</span>
-            </div>
-            <div className="grafana-kpi-value">
-              {kpi.isText ? kpi.value : (typeof kpi.value === 'number' ? kpi.value.toLocaleString() : kpi.value)}
-            </div>
-          </div>
-        ))}
+      {/* ── Row 0: AI Insight Banner ── */}
+      <div className="animate-in">
+        <AIInsightBanner
+          dashboard={dashboard}
+          goldenSignals={goldenSignals}
+          trendData={trendData}
+        />
       </div>
 
-      {/* ── Row 2: Incident Trend + Error Distribution ── */}
+      {/* ── Row 1: System Health Gauge + Golden Signals ── */}
+      <div className="enterprise-hero-row animate-in animate-in-delay-1">
+        <div className="enterprise-health-panel">
+          <GrafanaPanel title="System Health" subtitle="composite score" loading={chartsLoading}>
+            <SystemHealthGauge
+              score={healthData?.score ?? 0}
+              status={healthData?.status ?? 'HEALTHY'}
+              factors={healthData?.factors}
+            />
+          </GrafanaPanel>
+        </div>
+        <div className="enterprise-signals-panel">
+          <GrafanaPanel title="Golden Signals" subtitle="Google SRE methodology" loading={chartsLoading}>
+            <GoldenSignalsRow signals={goldenSignals || {}} />
+          </GrafanaPanel>
+        </div>
+      </div>
+
+      {/* ── Row 2: Enhanced KPI Stat Cards with Sparklines ── */}
+      <div className="grafana-kpi-grid animate-in animate-in-delay-2">
+        {kpiCards.map((kpi, i) => {
+          const sparkData = kpi.trendKey
+            ? kpiTrends.map((d) => d[kpi.trendKey] || 0)
+            : [];
+          const delta = kpi.trendKey ? getDelta(kpi.trendKey) : null;
+          const sparkColor = kpi.color === 'rose' ? '#ef4444'
+            : kpi.color === 'amber' ? '#f59e0b'
+            : kpi.color === 'emerald' ? '#10b981'
+            : kpi.color === 'violet' ? '#8b5cf6'
+            : kpi.color === 'blue' ? '#3b82f6'
+            : '#06b6d4';
+
+          return (
+            <div
+              key={kpi.label}
+              className={`grafana-kpi-card kpi-${kpi.color} animate-in animate-in-delay-${(i % 4) + 1}`}
+            >
+              <div className="grafana-kpi-header">
+                <span className="grafana-kpi-label">{kpi.label}</span>
+                <span className="grafana-kpi-icon">{kpi.icon}</span>
+              </div>
+              <div className="grafana-kpi-value">
+                {kpi.isText ? kpi.value : (
+                  <AnimatedCounter value={typeof kpi.value === 'number' ? kpi.value : 0} />
+                )}
+              </div>
+              <div className="grafana-kpi-footer">
+                {sparkData.length > 2 && (
+                  <SparklineChart data={sparkData} width={64} height={22} color={sparkColor} />
+                )}
+                {delta !== null && delta !== 0 && (
+                  <span className={`grafana-kpi-delta ${delta > 0 ? 'delta-up' : 'delta-down'}`}>
+                    {delta > 0 ? '↑' : '↓'} {Math.abs(delta)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Row 3: SLO/Error Budget + MTTR Breakdown ── */}
       <div className="grafana-grid animate-in animate-in-delay-2">
+        <div className="grafana-grid-row row-50-50">
+          <GrafanaPanel title="SLO Compliance" subtitle="error budget tracking" loading={chartsLoading}>
+            <SLOWidget sloData={sloData} />
+          </GrafanaPanel>
+          <GrafanaPanel title="MTTR Breakdown" subtitle="by priority" loading={chartsLoading}>
+            <MTTRGauge mttrData={mttrData} />
+          </GrafanaPanel>
+        </div>
+      </div>
+
+      {/* ── Row 4: Incident Trend + Error Distribution ── */}
+      <div className="grafana-grid animate-in animate-in-delay-3">
         <div className="grafana-grid-row row-60-40">
           <GrafanaPanel
             title="Incident Trend"
@@ -310,7 +396,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Row 3: Log Volume + Service Health ── */}
+      {/* ── Row 5: Log Volume + Service Uptime Heatmap ── */}
       <div className="grafana-grid animate-in animate-in-delay-3">
         <div className="grafana-grid-row row-50-50">
           <GrafanaPanel
@@ -324,16 +410,40 @@ export default function Dashboard() {
           </GrafanaPanel>
 
           <GrafanaPanel
-            title="Service Health Matrix"
-            subtitle="incidents per service"
+            title="Service Uptime (30 Days)"
+            subtitle="incident severity heatmap"
             loading={chartsLoading}
           >
-            <ServiceHealthChart services={serviceData} />
+            <ServiceUptimeHeatmap
+              heatmapData={uptimeData?.heatmap || []}
+              services={uptimeData?.services || []}
+              days={uptimeData?.days || 30}
+            />
           </GrafanaPanel>
         </div>
       </div>
 
-      {/* ── Row 4: Top Recurring Issues ── */}
+      {/* ── Row 6: Incident Timeline + Pipeline Health Ring ── */}
+      <div className="grafana-grid animate-in animate-in-delay-2">
+        <div className="grafana-grid-row row-60-40">
+          <GrafanaPanel
+            title="Incident Timeline"
+            subtitle={`${recentIncidents.length} recent events`}
+          >
+            <IncidentTimeline incidents={recentIncidents} />
+          </GrafanaPanel>
+
+          <GrafanaPanel
+            title="Pipeline Health"
+            subtitle={`${recentRuns.length} recent runs`}
+            loading={chartsLoading}
+          >
+            <PipelineHealthRing runs={recentRuns} />
+          </GrafanaPanel>
+        </div>
+      </div>
+
+      {/* ── Row 7: Top Recurring Issues ── */}
       <div className="grafana-grid animate-in animate-in-delay-4">
         <GrafanaPanel
           title="Top Recurring Issues"
@@ -352,7 +462,7 @@ export default function Dashboard() {
         </GrafanaPanel>
       </div>
 
-      {/* ── Row 5: Live Incident Feed ── */}
+      {/* ── Row 8: Live Incident Feed ── */}
       <div className="grafana-grid animate-in animate-in-delay-2">
         <GrafanaPanel
           title="Live Incident Feed"
@@ -419,7 +529,7 @@ export default function Dashboard() {
         </GrafanaPanel>
       </div>
 
-      {/* ── Row 6: Pipeline Run History ── */}
+      {/* ── Row 9: Pipeline Run History ── */}
       <div className="grafana-grid animate-in animate-in-delay-3">
         <GrafanaPanel
           title="Pipeline Run History"
@@ -491,7 +601,6 @@ export default function Dashboard() {
               <button className="ncm-close" onClick={() => setSelectedIncident(null)}>✕</button>
             </div>
             <div className="ncm-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Priority + Status row */}
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span className={`priority-badge ${priorityBadge(selectedIncident.priority)}`}>
                   {selectedIncident.priority}
@@ -501,8 +610,6 @@ export default function Dashboard() {
                   <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{selectedIncident.status?.replace('_', ' ')}</span>
                 </span>
               </div>
-
-              {/* Detail grid */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <DetailField label="Service" value={
                   `${SERVICE_LABELS[selectedIncident.source_service]?.icon || '☁️'} ${SERVICE_LABELS[selectedIncident.source_service]?.label || selectedIncident.source_service || '—'}`
@@ -519,8 +626,6 @@ export default function Dashboard() {
                   <DetailField label="Resolved At" value={formatDate(selectedIncident.resolved_at)} />
                 )}
               </div>
-
-              {/* Recommended Resolution */}
               {selectedIncident.ai_solution && (
                 <div>
                   <div style={{
@@ -537,8 +642,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               )}
-
-              {/* Raw Description */}
               {selectedIncident.description && (
                 <div>
                   <div style={{
