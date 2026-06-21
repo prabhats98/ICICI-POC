@@ -1,14 +1,19 @@
 /**
- * Header Component - Top bar with page title, search, and pipeline trigger.
+ * Header Component - Top bar with page title, search, pipeline trigger, and user profile.
+ * All icons are inline SVGs — no emojis.
  */
 
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import useAppStore from '../store/useAppStore';
+import useAuthStore from '../store/useAuthStore';
 import { triggerPipeline, resetAndRunPipeline } from '../services/api';
 import { useState } from 'react';
+import {
+  RefreshIcon, PlayIcon, LogOutIcon, ChevronDownIcon, ChevronUpIcon,
+} from '../components/Icons';
 
 const PAGE_TITLES = {
-  '/': 'Dashboard',
+  '/dashboard': 'Dashboard',
   '/workflow': 'Agent Workflow',
   '/logs': 'Log Explorer',
   '/incidents': 'Incident Panel',
@@ -17,8 +22,11 @@ const PAGE_TITLES = {
 
 export default function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { isPipelineRunning, setPipelineRunning, pipelineEnabled } = useAppStore();
+  const { user, logout } = useAuthStore();
   const [triggering, setTriggering] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const title = PAGE_TITLES[location.pathname] || 'Dashboard';
 
   const handleTriggerPipeline = async (resetFirst = false) => {
@@ -37,6 +45,11 @@ export default function Header() {
     } finally {
       setTriggering(false);
     }
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
   };
 
   return (
@@ -70,7 +83,7 @@ export default function Header() {
           {isPipelineRunning ? (
             <><span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }}></span> Resetting</>
           ) : (
-            <>🔄 Reset & Re-run</>
+            <><RefreshIcon size={14} /> Reset & Re-run</>
           )}
         </button>
         <button
@@ -81,9 +94,37 @@ export default function Header() {
           {isPipelineRunning ? (
             <><span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }}></span> Running</>
           ) : (
-            <>▶ Run Pipeline</>
+            <><PlayIcon size={14} /> Run Pipeline</>
           )}
         </button>
+
+        {/* User profile & logout */}
+        <div className="header-user" id="header-user">
+          <button
+            className="header-user-btn"
+            id="user-menu-btn"
+            onClick={() => setShowUserMenu(!showUserMenu)}
+          >
+            <div className="header-avatar">
+              {user?.name?.[0]?.toUpperCase() || 'A'}
+            </div>
+            <span className="header-user-name">{user?.name || 'Admin'}</span>
+            {showUserMenu ? <ChevronUpIcon size={12} /> : <ChevronDownIcon size={12} />}
+          </button>
+          {showUserMenu && (
+            <div className="header-user-menu" id="user-dropdown">
+              <div className="header-user-menu-info">
+                <div className="header-user-menu-name">{user?.name || 'Admin'}</div>
+                <div className="header-user-menu-email">{user?.email || 'admin@krelixir.com'}</div>
+                <div className="header-user-menu-role">{user?.role || 'admin'}</div>
+              </div>
+              <div className="header-user-menu-divider" />
+              <button className="header-user-menu-item" id="logout-btn" onClick={handleLogout}>
+                <LogOutIcon size={15} /> Sign Out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

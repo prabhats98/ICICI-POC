@@ -5,12 +5,14 @@ Azure Incident Log Pipeline — FastAPI Application Entry Point
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db, close_db
 from app.utils.logger import setup_logging
+from app.utils.auth_middleware import get_current_user
+from app.api.auth import router as auth_router
 from app.api.logs import router as logs_router
 from app.api.incidents import router as incidents_router
 from app.api.agents import router as agents_router
@@ -62,15 +64,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API routers
-app.include_router(logs_router)
-app.include_router(incidents_router)
-app.include_router(agents_router)
-app.include_router(workflow_router)
-app.include_router(export_router)
+# Auth router — public (no auth required)
+app.include_router(auth_router)
+
+# Protected API routers — require JWT authentication
+app.include_router(logs_router, dependencies=[Depends(get_current_user)])
+app.include_router(incidents_router, dependencies=[Depends(get_current_user)])
+app.include_router(agents_router, dependencies=[Depends(get_current_user)])
+app.include_router(workflow_router, dependencies=[Depends(get_current_user)])
+app.include_router(export_router, dependencies=[Depends(get_current_user)])
 app.include_router(ws_router)
-app.include_router(node_config_router)
-app.include_router(pipeline_router)
+app.include_router(node_config_router, dependencies=[Depends(get_current_user)])
+app.include_router(pipeline_router, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/", tags=["Health"])
