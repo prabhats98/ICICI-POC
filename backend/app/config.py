@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     azure_frontdoor_resource_id: str = ""
     azure_appgateway_resource_id: str = ""
     azure_apim_resource_id: str = ""
+    azure_appservice_url: str = ""
+    azure_apim_gateway_url: str = ""
+    azure_appgw_public_ip: str = ""
+    azure_appgw_dns: str = ""
     azure_vm_resource_id: str = ""
     azure_log_analytics_workspace_id: str = ""
     # Deployed resource endpoints (informational)
@@ -72,6 +76,11 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from_email: str = ""
     smtp_to_email: str = ""
+
+    # --- Authentication (JWT) ---
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_hours: int = 24
 
     # --- Export ---
     export_dir: str = "./exports"

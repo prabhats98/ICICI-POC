@@ -1,5 +1,6 @@
 /**
  * API Service - Axios wrapper for backend communication.
+ * Includes JWT auth interceptors for automatic token attachment and 401 handling.
  */
 
 import axios from 'axios';
@@ -10,6 +11,39 @@ const api = axios.create({
   baseURL: API_BASE,
   headers: { 'Content-Type': 'application/json' },
 });
+
+// --- Request Interceptor: attach JWT token ---
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('cloudguard_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// --- Response Interceptor: handle 401 → redirect to login ---
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Don't redirect if we're already on auth routes
+      const isAuthRoute = error.config?.url?.includes('/api/auth/');
+      if (!isAuthRoute) {
+        localStorage.removeItem('cloudguard_token');
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// --- Auth ---
+export const authLogin = (email, password) => api.post('/api/auth/login', { email, password });
+export const authMe = () => api.get('/api/auth/me');
+export const authLogout = () => api.post('/api/auth/logout');
 
 // --- Dashboard ---
 export const getDashboardSummary = () => api.get('/api/dashboard');
