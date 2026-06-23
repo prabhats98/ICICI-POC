@@ -193,21 +193,69 @@ Return as valid JSON:
 ISSUES:
 {issues_text}"""
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json",
-                ),
-            )
-            result = _parse_json(response.text)
-            return result.get("classified_issues", [])
-        except Exception as e:
-            logger.error(f"Priority assignment failed: {e}")
-            raise
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=GenerateContentConfig(
+                        temperature=0.1,
+                        max_output_tokens=8192,
+                        response_mime_type="application/json",
+                    ),
+                )
+
+                try:
+                    response_text = response.text or ""
+                except (ValueError, AttributeError):
+                    response_text = ""
+
+                if not response_text.strip():
+                    if attempt < max_retries:
+                        import asyncio
+                        await asyncio.sleep(2)
+                        continue
+                    # Fallback: return issues with default P2 priority
+                    logger.warning("Priority assignment: empty Gemini response, using defaults")
+                    return [
+                        {
+                            "original_title": issue.get("title", "Unknown"),
+                            "priority": "P2",
+                            "category": issue.get("incident_type", "Uncategorized"),
+                            "incident_type": issue.get("incident_type", ""),
+                            "enriched_description": issue.get("description", ""),
+                            "severity": issue.get("severity", 5),
+                            "justification": "Default P2 — Gemini response was empty",
+                            "affected_service": issue.get("affected_service", "Unknown"),
+                        }
+                        for issue in issues
+                    ]
+
+                result = _parse_json(response_text)
+                return result.get("classified_issues", [])
+
+            except Exception as e:
+                logger.error(f"Priority assignment attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries:
+                    import asyncio
+                    await asyncio.sleep(2)
+                    continue
+                # Final fallback: return issues with default P2 priority
+                logger.warning("Priority assignment: all retries failed, using defaults")
+                return [
+                    {
+                        "original_title": issue.get("title", "Unknown"),
+                        "priority": "P2",
+                        "category": issue.get("incident_type", "Uncategorized"),
+                        "incident_type": issue.get("incident_type", ""),
+                        "enriched_description": issue.get("description", ""),
+                        "severity": issue.get("severity", 5),
+                        "justification": f"Default P2 — priority classification failed: {str(e)}",
+                        "affected_service": issue.get("affected_service", "Unknown"),
+                    }
+                    for issue in issues
+                ]
 
     async def generate_resolution(
         self, incident: dict[str, Any], historical_context: list[dict] | None = None

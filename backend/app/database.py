@@ -1,6 +1,6 @@
 """
-Database Configuration — PostgreSQL only.
-Async SQLAlchemy engine and session management for Azure Database for PostgreSQL.
+Database Configuration — Supports PostgreSQL and SQLite (local dev fallback).
+Async SQLAlchemy engine and session management.
 """
 
 from sqlalchemy.ext.asyncio import (
@@ -15,13 +15,20 @@ from app.config import get_settings
 
 settings = get_settings()
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-)
+# SQLite doesn't support pool_size / pool_pre_ping
+_is_sqlite = settings.database_url.startswith("sqlite")
+
+_engine_kwargs = {
+    "echo": settings.debug,
+}
+if not _is_sqlite:
+    _engine_kwargs.update({
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_pre_ping": True,
+    })
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 
 async_session = async_sessionmaker(
     engine,
