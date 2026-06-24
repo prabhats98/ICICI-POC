@@ -68,7 +68,7 @@ export const getAgentHistory = (params) => api.get('/api/agents/history', { para
 // --- Pipeline Control ---
 export const getPipelineStatus = () => api.get('/api/pipeline/status');
 export const togglePipeline = (enabled) => api.post('/api/pipeline/toggle', { enabled });
-export const triggerManualRun = () => api.post('/api/pipeline/run');
+export const triggerManualRun = (data = {}) => api.post('/api/pipeline/run', data);
 export const getPipelineThresholds = () => api.get('/api/pipeline/thresholds');
 export const updatePipelineThresholds = (data) => api.put('/api/pipeline/thresholds', data);
 

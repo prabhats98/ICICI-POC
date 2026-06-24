@@ -180,12 +180,18 @@ def build_pipeline() -> StateGraph:
 pipeline = build_pipeline().compile()
 
 
-async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
+async def run_pipeline(
+    trigger_type: str = "manual",
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> dict[str, Any]:
     """
     Execute the full 8-agent pipeline.
 
     Args:
         trigger_type: "manual" or "scheduler"
+        start_time: Optional ISO 8601 GMT start datetime for time-range filtering
+        end_time: Optional ISO 8601 GMT end datetime for time-range filtering
 
     Returns:
         Pipeline result summary
@@ -219,12 +225,16 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
     await _broadcast("pipeline_start", {"run_id": run_id, "trigger": trigger_type})
 
     # Initial state
+    has_time_range = bool(start_time and end_time)
     initial_state: PipelineState = {
         "run_id": run_id,
         "trigger_type": trigger_type,
         "started_at": datetime.utcnow().isoformat(),
         "current_agent": "starting",
         "status": "running",
+        "time_range_start": start_time or "",
+        "time_range_end": end_time or "",
+        "no_logs_found": False,
         "total_collected": 0,
         "per_source": {},
         "raw_log_ids": [],
@@ -256,6 +266,9 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
         total_duration = round(time.time() - pipeline_start, 2)
         summary = result.get("summary", {})
 
+        # Check for no-logs-found when a time range was specified
+        no_logs = has_time_range and result.get("total_collected", 0) == 0
+
         # Update AgentRun record
         try:
             async with async_session() as session:
@@ -285,7 +298,17 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
             "status": "completed",
             "duration": total_duration,
             "summary": summary,
+            "no_logs_found": no_logs,
         })
+
+        # Broadcast a special event if no logs found for the time range
+        if no_logs:
+            await _broadcast("pipeline_no_logs", {
+                "run_id": run_id,
+                "time_range_start": start_time,
+                "time_range_end": end_time,
+                "message": "No logs found for the selected time range",
+            })
 
         logger.info(f"Pipeline run completed: {run_id} in {total_duration}s")
         return {

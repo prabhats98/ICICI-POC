@@ -77,6 +77,14 @@ export default function useWebSocket() {
               setCurrentNode(null);
               addNotification({ type: 'error', message: `Pipeline error: ${data.error}` });
               break;
+
+            case 'pipeline_no_logs':
+              addNotification({
+                type: 'warning',
+                message: data.message || 'No logs found for the selected time range',
+                timeRange: { start: data.time_range_start, end: data.time_range_end },
+              });
+              break;
           }
         } catch (e) {
           console.error('[WS] Parse error:', e);

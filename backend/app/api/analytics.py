@@ -65,9 +65,12 @@ async def incident_trend(days: int = Query(7, ge=1, le=90)):
 @router.get("/service-breakdown")
 async def service_breakdown():
     """
-    Incident counts per Azure service (Front Door, App Gateway, APIM).
+    Incident counts per Azure service (Front Door, App Gateway, APIM, VM).
     Broken down by priority and status.
+    Includes recent open error titles for each service.
     """
+    all_services = ["azure-front-door", "azure-app-gateway", "azure-apim", "azure-vm"]
+
     async with async_session() as session:
         result = await session.execute(
             select(
@@ -81,6 +84,36 @@ async def service_breakdown():
             .order_by(Incident.source_service)
         )
         rows = result.all()
+
+        # Fetch up to 3 most recent OPEN incidents per service for error details
+        recent_errors_result = await session.execute(
+            select(
+                Incident.source_service,
+                Incident.title,
+                Incident.priority,
+                Incident.category,
+                Incident.created_at,
+            )
+            .where(Incident.source_service.in_(all_services))
+            .where(Incident.status.in_([IncidentStatus.OPEN, IncidentStatus.IN_PROGRESS]))
+            .order_by(desc(Incident.created_at))
+            .limit(20)  # Fetch extra, we'll slice per-service below
+        )
+        recent_rows = recent_errors_result.all()
+
+    # Build recent-errors map: service → list of {title, priority, category}
+    recent_errors_map: dict[str, list] = {}
+    for r in recent_rows:
+        svc = r.source_service
+        if svc not in recent_errors_map:
+            recent_errors_map[svc] = []
+        if len(recent_errors_map[svc]) < 3:
+            recent_errors_map[svc].append({
+                "title": r.title,
+                "priority": r.priority.value if hasattr(r.priority, "value") else str(r.priority),
+                "category": r.category,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            })
 
     # Aggregate by service
     services: dict[str, dict] = {}
@@ -101,6 +134,30 @@ async def service_breakdown():
             services[svc]["open"] += row.count
         elif status in ("RESOLVED", "CLOSED"):
             services[svc]["resolved"] += row.count
+
+    # Ensure all 4 services are represented (even if zero incidents)
+    for svc in all_services:
+        if svc not in services:
+            services[svc] = {
+                "service": svc,
+                "total": 0,
+                "P1": 0, "P2": 0, "P3": 0,
+                "open": 0, "resolved": 0,
+            }
+
+    # Attach error details and status flag
+    for svc, data in services.items():
+        data["recent_errors"] = recent_errors_map.get(svc, [])
+        data["has_errors"] = data["open"] > 0
+        # Determine severity level: "critical" if any P1 open, "warning" if P2, else "ok"
+        if data["P1"] > 0 and data["open"] > 0:
+            data["health"] = "critical"
+        elif data["P2"] > 0 and data["open"] > 0:
+            data["health"] = "warning"
+        elif data["open"] > 0:
+            data["health"] = "degraded"
+        else:
+            data["health"] = "healthy"
 
     return {"services": list(services.values())}
 

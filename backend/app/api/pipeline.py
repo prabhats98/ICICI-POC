@@ -44,14 +44,26 @@ async def toggle_pipeline(body: dict = {}):
 
 
 @router.post("/run")
-async def manual_run():
-    """Trigger a manual pipeline run."""
+async def manual_run(body: dict = {}):
+    """Trigger a manual pipeline run with optional time range filter (GMT)."""
     if not is_pipeline_enabled():
         return {"status": "error", "message": "Pipeline is disabled. Enable it first."}
 
+    start_time = body.get("start_time")  # ISO 8601 GMT string
+    end_time = body.get("end_time")      # ISO 8601 GMT string
+
     import asyncio
-    asyncio.create_task(run_pipeline(trigger_type="manual"))
-    return {"status": "started", "message": "Pipeline run started"}
+    asyncio.create_task(run_pipeline(
+        trigger_type="manual",
+        start_time=start_time,
+        end_time=end_time,
+    ))
+
+    msg = "Pipeline run started"
+    if start_time and end_time:
+        msg += f" for time range {start_time} → {end_time} (GMT)"
+
+    return {"status": "started", "message": msg}
 
 
 @router.get("/thresholds")

@@ -15,10 +15,14 @@ router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
 @router.post("/run")
 async def trigger_run(body: dict = {}):
-    """Trigger a manual pipeline run."""
+    """Trigger a manual pipeline run with optional time range filter."""
     import asyncio
     from app.agents.graph import run_pipeline
-    asyncio.create_task(run_pipeline(trigger_type=body.get("trigger_type", "manual")))
+    asyncio.create_task(run_pipeline(
+        trigger_type=body.get("trigger_type", "manual"),
+        start_time=body.get("start_time"),
+        end_time=body.get("end_time"),
+    ))
     return {"status": "started", "message": "Pipeline run triggered"}
 
 

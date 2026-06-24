@@ -5,7 +5,7 @@ Collects from: Azure Front Door, Application Gateway, API Management, VM.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -13,6 +13,23 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _build_time_filter(
+    hours_back: int = 6,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+) -> str:
+    """Build a KQL time filter clause.
+
+    If explicit start/end datetimes are provided, use them.
+    Otherwise fall back to `ago(Xh)`.
+    """
+    if start_time and end_time:
+        s = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        e = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return f"| where TimeGenerated >= datetime('{s}') and TimeGenerated <= datetime('{e}')"
+    return f"| where TimeGenerated > ago({hours_back}h)"
 
 
 class AzureLogService:
@@ -68,10 +85,16 @@ class AzureLogService:
 
         return rows
 
-    async def collect_frontdoor_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
+    async def collect_frontdoor_logs(
+        self,
+        hours_back: int = 6,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
         """Pull Azure Front Door logs: requests, WAF events, routing, latency, 4xx/5xx."""
+        time_filter = _build_time_filter(hours_back, start_time, end_time)
         kql = f"""AzureDiagnostics
-| where TimeGenerated > ago({hours_back}h)
+{time_filter}
 | where ResourceProvider == "MICROSOFT.CDN" or ResourceProvider == "MICROSOFT.NETWORK"
 | where Category in ("FrontDoorAccessLog", "FrontDoorHealthProbeLog", "FrontDoorWebApplicationFirewallLog")
 | extend Level = column_ifexists("Level", "Information")
@@ -85,10 +108,16 @@ class AzureLogService:
             logger.warning(f"Front Door log collection skipped: {e}")
             return []
 
-    async def collect_appgateway_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
+    async def collect_appgateway_logs(
+        self,
+        hours_back: int = 6,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
         """Pull Application Gateway logs: access, performance, firewall, health probes."""
+        time_filter = _build_time_filter(hours_back, start_time, end_time)
         kql = f"""AzureDiagnostics
-| where TimeGenerated > ago({hours_back}h)
+{time_filter}
 | where ResourceProvider == "MICROSOFT.NETWORK"
 | where Category in ("ApplicationGatewayAccessLog", "ApplicationGatewayPerformanceLog", "ApplicationGatewayFirewallLog")
 | extend httpStat = column_ifexists("httpStatus_d", 0.0)
@@ -114,17 +143,23 @@ class AzureLogService:
             logger.error(f"App Gateway log collection failed: {e}")
             return []
 
-    async def collect_apim_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
+    async def collect_apim_logs(
+        self,
+        hours_back: int = 6,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
         """Pull API Management logs: gateway, backend responses, policy failures."""
+        time_filter = _build_time_filter(hours_back, start_time, end_time)
         # ApiManagementGatewayLogs dedicated table (Consumption tier)
         kql_dedicated = f"""ApiManagementGatewayLogs
-| where TimeGenerated > ago({hours_back}h)
+{time_filter}
 | extend Level = iff(ResponseCode >= 500, "Error", iff(ResponseCode >= 400, "Warning", "Information"))
 | order by TimeGenerated desc
 | limit 500"""
         # Fallback: AzureDiagnostics
         kql_diag = f"""AzureDiagnostics
-| where TimeGenerated > ago({hours_back}h)
+{time_filter}
 | where ResourceProvider == "MICROSOFT.APIMANAGEMENT"
 | where Category in ("GatewayLogs")
 | extend Level = column_ifexists("Level", "Information")
@@ -144,14 +179,20 @@ class AzureLogService:
             logger.warning(f"APIM log collection skipped: {e}")
             return []
 
-    async def collect_vm_logs(self, hours_back: int = 6) -> list[dict[str, Any]]:
+    async def collect_vm_logs(
+        self,
+        hours_back: int = 6,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
         """Pull VM logs: syslog, heartbeat, performance counters."""
+        time_filter = _build_time_filter(hours_back, start_time, end_time)
         kql = f"""
 let syslog = Syslog
-| where TimeGenerated > ago({hours_back}h)
+{time_filter}
 | project TimeGenerated, SeverityLevel, Facility, SyslogMessage, Computer, HostIP;
 let perf = Perf
-| where TimeGenerated > ago({hours_back}h)
+{time_filter}
 | where CounterName in ("% Processor Time", "Available MBytes", "Disk Reads/sec")
 | where CounterValue > 90 or CounterName == "Available MBytes" and CounterValue < 500
 | project TimeGenerated, CounterName, CounterValue, Computer, InstanceName;
@@ -174,11 +215,19 @@ syslog
             logger.error(f"VM log collection failed: {e}")
             return []
 
-    async def collect_all(self, hours_back: int = 1) -> dict[str, list[dict[str, Any]]]:
+    async def collect_all(
+        self,
+        hours_back: int = 1,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> dict[str, list[dict[str, Any]]]:
         """Collect logs from all Azure sources via Log Analytics KQL.
         
         Always runs all queries regardless of whether resource IDs are set —
         the workspace ID alone is sufficient for KQL. Returns real logs only.
+
+        If start_time and end_time are provided, queries use an explicit
+        datetime window instead of ago(Xh).
         """
         results = {}
 
@@ -186,22 +235,30 @@ syslog
             logger.warning("Log Collector: AZURE_LOG_ANALYTICS_WORKSPACE_ID not set — skipping collection")
             return results
 
-        # Always collect from all 4 sources — KQL filters by resource type, not ID
-        logger.info(f"Log Collector: Querying Log Analytics for last {hours_back}h of logs")
+        # Log the time window being queried
+        if start_time and end_time:
+            logger.info(
+                f"Log Collector: Querying Log Analytics for time range "
+                f"{start_time.isoformat()} to {end_time.isoformat()} (GMT)"
+            )
+        else:
+            logger.info(f"Log Collector: Querying Log Analytics for last {hours_back}h of logs")
 
-        frontdoor_logs = await self.collect_frontdoor_logs(hours_back)
+        kwargs = {"hours_back": hours_back, "start_time": start_time, "end_time": end_time}
+
+        frontdoor_logs = await self.collect_frontdoor_logs(**kwargs)
         if frontdoor_logs:
             results["azure-front-door"] = frontdoor_logs
 
-        appgw_logs = await self.collect_appgateway_logs(hours_back)
+        appgw_logs = await self.collect_appgateway_logs(**kwargs)
         if appgw_logs:
             results["azure-app-gateway"] = appgw_logs
 
-        apim_logs = await self.collect_apim_logs(hours_back)
+        apim_logs = await self.collect_apim_logs(**kwargs)
         if apim_logs:
             results["azure-apim"] = apim_logs
 
-        vm_logs = await self.collect_vm_logs(hours_back)
+        vm_logs = await self.collect_vm_logs(**kwargs)
         if vm_logs:
             results["azure-vm"] = vm_logs
 

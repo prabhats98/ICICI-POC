@@ -18,6 +18,11 @@ class PipelineState(TypedDict, total=False):
     current_agent: str
     status: str  # "running", "completed", "failed"
 
+    # --- Time range filter (GMT) ---
+    time_range_start: str  # ISO 8601 GMT start datetime (optional)
+    time_range_end: str  # ISO 8601 GMT end datetime (optional)
+    no_logs_found: bool  # True when time-range query returned zero logs
+
     # --- Log Collector outputs ---
     total_collected: int
     per_source: dict[str, int]  # {"azure-front-door": 50, ...}

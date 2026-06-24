@@ -78,6 +78,7 @@ export default function Dashboard() {
   const [sloData, setSloData] = useState(null);
   const [uptimeData, setUptimeData] = useState(null);
   const [kpiTrends, setKpiTrends] = useState([]);
+  const [serviceData, setServiceData] = useState([]);
 
   // Time range selectors
   const [trendRange, setTrendRange] = useState('7d');
@@ -88,6 +89,15 @@ export default function Dashboard() {
 
   // Incident detail modal
   const [selectedIncident, setSelectedIncident] = useState(null);
+
+  // Time range picker state (GMT)
+  const [trDate, setTrDate] = useState('');
+  const [trStartTime, setTrStartTime] = useState('');
+  const [trEndTime, setTrEndTime] = useState('');
+
+  // No-logs toast popup
+  const [noLogsToast, setNoLogsToast] = useState(null);
+  const noLogsTimerRef = useState(null);
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -120,9 +130,10 @@ export default function Dashboard() {
         getSLOStatus(),
         getServiceUptime(30),
         getKPITrends(7),
+        getServiceBreakdown(),
       ]);
 
-      const [trendRes, logVolRes, errDistRes, topRes, mttrRes, gsRes, healthRes, sloRes, uptimeRes, kpiRes] = results;
+      const [trendRes, logVolRes, errDistRes, topRes, mttrRes, gsRes, healthRes, sloRes, uptimeRes, kpiRes, svcRes] = results;
 
       if (trendRes.status === 'fulfilled') setTrendData(trendRes.value.data.data || []);
       if (logVolRes.status === 'fulfilled') setLogVolumeData(logVolRes.value.data.data || []);
@@ -134,6 +145,7 @@ export default function Dashboard() {
       if (sloRes.status === 'fulfilled') setSloData(sloRes.value.data);
       if (uptimeRes.status === 'fulfilled') setUptimeData(uptimeRes.value.data);
       if (kpiRes.status === 'fulfilled') setKpiTrends(kpiRes.value.data.data || []);
+      if (svcRes.status === 'fulfilled') setServiceData(svcRes.value.data.services || []);
     } catch (err) {
       console.error('Charts load error:', err);
     } finally {
@@ -178,7 +190,19 @@ export default function Dashboard() {
   const handleManualRun = async () => {
     setRunning(true);
     try {
-      await triggerManualRun();
+      // Build time range payload if all fields are filled
+      const payload = {};
+      if (trDate && trStartTime && trEndTime) {
+        payload.start_time = `${trDate}T${trStartTime}:00Z`;
+        payload.end_time = `${trDate}T${trEndTime}:00Z`;
+      }
+      const res = await triggerManualRun(payload);
+
+      // Check for synchronous no-logs response (if pipeline completes very fast)
+      if (res.data?.no_logs_found) {
+        showNoLogsToast();
+      }
+
       setTimeout(() => {
         loadDashboard();
         loadCharts();
@@ -189,6 +213,25 @@ export default function Dashboard() {
       setTimeout(() => setRunning(false), 2000);
     }
   };
+
+  // Show no-logs toast and auto-dismiss after 6s
+  const showNoLogsToast = () => {
+    const timeLabel = (trDate && trStartTime && trEndTime)
+      ? `${trDate} ${trStartTime} — ${trEndTime} (GMT)`
+      : 'the selected time range';
+    setNoLogsToast(`No logs found for ${timeLabel}`);
+    setTimeout(() => setNoLogsToast(null), 6000);
+  };
+
+  // Listen for no-logs WebSocket notification
+  const notifications = useAppStore((s) => s.notifications);
+  useEffect(() => {
+    const latest = notifications[0];
+    if (latest && latest.type === 'warning' && latest.message?.includes('No logs found')) {
+      showNoLogsToast();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications]);
 
   const formatDate = (dateStr) => {
     if (!dateStr || dateStr === 'None') return 'N/A';
@@ -226,6 +269,7 @@ export default function Dashboard() {
   };
 
   return (
+    <>
     <div className="page-content">
       {/* ── Page Header ── */}
       <div className="page-header animate-in">
@@ -278,6 +322,51 @@ export default function Dashboard() {
             </span>
           </div>
 
+          {/* Time Range Picker (GMT) */}
+          <div className="time-range-picker">
+            <div className="time-range-picker-label">
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Time Range (GMT)</span>
+            </div>
+            <div className="time-range-picker-inputs">
+              <input
+                type="date"
+                id="tr-date"
+                className="time-range-input"
+                value={trDate}
+                onChange={(e) => setTrDate(e.target.value)}
+                title="Select date (GMT)"
+              />
+              <input
+                type="time"
+                id="tr-start"
+                className="time-range-input"
+                value={trStartTime}
+                onChange={(e) => setTrStartTime(e.target.value)}
+                title="Start time (GMT)"
+                placeholder="Start"
+              />
+              <span style={{ color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600 }}>→</span>
+              <input
+                type="time"
+                id="tr-end"
+                className="time-range-input"
+                value={trEndTime}
+                onChange={(e) => setTrEndTime(e.target.value)}
+                title="End time (GMT)"
+                placeholder="End"
+              />
+              {(trDate || trStartTime || trEndTime) && (
+                <button
+                  className="time-range-clear-btn"
+                  onClick={() => { setTrDate(''); setTrStartTime(''); setTrEndTime(''); }}
+                  title="Clear time range"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
           <button className="btn btn-primary btn-sm" onClick={handleManualRun} disabled={!pipelineEnabled || running}>
             {running ? '⟳ Running…' : '▶ Run Pipeline'}
           </button>
@@ -313,6 +402,69 @@ export default function Dashboard() {
             <GoldenSignalsRow signals={goldenSignals || {}} />
           </GrafanaPanel>
         </div>
+      </div>
+
+      {/* ── Row 1.5: Service Status Cards ── */}
+      <div className="service-status-grid animate-in animate-in-delay-1">
+        {(['azure-front-door', 'azure-app-gateway', 'azure-apim', 'azure-vm']).map((svcKey) => {
+          const svc = serviceData.find(s => s.service === svcKey) || { service: svcKey, total: 0, P1: 0, P2: 0, P3: 0, open: 0, resolved: 0, has_errors: false, health: 'healthy', recent_errors: [] };
+          const meta = SERVICE_LABELS[svcKey] || { label: svcKey, icon: '📦', color: '#6366f1' };
+          const healthClass = svc.health || 'healthy';
+          const hasErrors = svc.has_errors;
+
+          return (
+            <div key={svcKey} className={`service-status-card ${healthClass}`} id={`svc-card-${svcKey}`}>
+              {/* Glow effect for error state */}
+              {hasErrors && <div className="service-status-card-glow" />}
+
+              <div className="service-status-header">
+                <div className="service-status-icon" style={{ background: hasErrors ? 'rgba(239,68,68,0.2)' : `${meta.color}22`, color: hasErrors ? '#ef4444' : meta.color }}>
+                  {meta.icon}
+                </div>
+                <div className="service-status-info">
+                  <div className="service-status-name">{meta.label}</div>
+                  <div className={`service-status-badge ${healthClass}`}>
+                    <span className="service-status-dot" />
+                    {healthClass === 'critical' ? 'Critical' : healthClass === 'warning' ? 'Warning' : healthClass === 'degraded' ? 'Degraded' : 'Healthy'}
+                  </div>
+                </div>
+                {svc.open > 0 && (
+                  <div className="service-status-open-badge">{svc.open} open</div>
+                )}
+              </div>
+
+              {/* Priority breakdown pills */}
+              <div className="service-status-priority-row">
+                <span className={`service-priority-pill ${svc.P1 > 0 ? 'p1-active' : ''}`}>🔴 P1: {svc.P1}</span>
+                <span className={`service-priority-pill ${svc.P2 > 0 ? 'p2-active' : ''}`}>🟡 P2: {svc.P2}</span>
+                <span className={`service-priority-pill ${svc.P3 > 0 ? 'p3-active' : ''}`}>🟢 P3: {svc.P3}</span>
+                <span className="service-priority-pill total">{svc.total} total</span>
+              </div>
+
+              {/* Recent error descriptions */}
+              {hasErrors && svc.recent_errors?.length > 0 && (
+                <div className="service-status-errors">
+                  <div className="service-status-errors-label">Active Errors</div>
+                  {svc.recent_errors.map((err, i) => (
+                    <div key={i} className="service-status-error-item">
+                      <span className={`service-error-priority-dot priority-${err.priority?.toLowerCase()}`} />
+                      <span className="service-error-title">{err.title}</span>
+                      {err.category && <span className="service-error-category">{err.category}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Resolved count footer */}
+              {svc.total > 0 && (
+                <div className="service-status-footer">
+                  <span className="service-resolved-count">✓ {svc.resolved} resolved</span>
+                  <span className="service-total-count">{svc.total} incidents</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Row 2: Enhanced KPI Stat Cards with Sparklines ── */}
@@ -663,6 +815,19 @@ export default function Dashboard() {
         </div>
       )}
     </div>
+
+    {/* ── No Logs Found Toast Popup ── */}
+    {noLogsToast && (
+      <div className="no-logs-toast" key={noLogsToast}>
+        <div className="no-logs-toast-icon">⚠️</div>
+        <div className="no-logs-toast-content">
+          <div className="no-logs-toast-title">No Logs Found</div>
+          <div className="no-logs-toast-message">{noLogsToast}</div>
+        </div>
+        <button className="no-logs-toast-close" onClick={() => setNoLogsToast(null)}>✕</button>
+      </div>
+    )}
+    </>
   );
 }
 

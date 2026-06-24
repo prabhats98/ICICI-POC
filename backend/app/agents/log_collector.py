@@ -34,8 +34,32 @@ async def log_collector_node(state: PipelineState) -> dict[str, Any]:
     try:
         from app.services.azure_log_service import azure_log_service
 
+        # Parse optional time range from pipeline state
+        start_time = None
+        end_time = None
+        time_range_start = state.get("time_range_start")
+        time_range_end = state.get("time_range_end")
+        if time_range_start and time_range_end:
+            try:
+                start_time = datetime.fromisoformat(
+                    time_range_start.replace("Z", "+00:00")
+                )
+                end_time = datetime.fromisoformat(
+                    time_range_end.replace("Z", "+00:00")
+                )
+                logger.info(
+                    f"Agent 1 [Log Collector]: Using time range filter: "
+                    f"{start_time.isoformat()} → {end_time.isoformat()} (GMT)"
+                )
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Agent 1 [Log Collector]: Invalid time range, falling back to hours_back: {e}")
+
         hours_back = settings.scheduler_interval_hours
-        all_logs = await azure_log_service.collect_all(hours_back=hours_back)
+        all_logs = await azure_log_service.collect_all(
+            hours_back=hours_back,
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         if not any(all_logs.values()):
             logger.info("Agent 1 [Log Collector]: No logs collected from any source")
