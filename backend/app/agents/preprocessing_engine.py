@@ -177,7 +177,20 @@ async def preprocessing_engine_node(state: PipelineState) -> dict[str, Any]:
                 .limit(500)
             )
             result = await session.execute(query)
-            raw_logs = result.scalars().all()
+            raw_logs_all = result.scalars().all()
+
+            # Prioritize ERROR/CRITICAL logs — move them to the front
+            # so the classifier always sees the most important logs first
+            def _log_priority(rl):
+                txt = ((rl.raw_text or "") + str(rl.raw_payload or "")).lower()
+                if any(k in txt for k in ["critical", "fatal", "outage", "crash"]):
+                    return 0
+                if any(k in txt for k in ["error", "exception", "failed", "failure", "timeout", "500", "502", "503"]):
+                    return 1
+                if any(k in txt for k in ["warning", "warn", "threshold", "429"]):
+                    return 2
+                return 3
+            raw_logs = sorted(raw_logs_all, key=_log_priority)
 
             if not raw_logs:
                 logger.info("Agent 2 [Preprocessing]: No raw logs to preprocess")

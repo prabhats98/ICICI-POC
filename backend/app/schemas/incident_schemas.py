@@ -38,10 +38,28 @@ class IncidentResponse(BaseModel):
     status: IncidentStatus
     log_ids: Optional[list[UUID]] = None
     log_count: int = 0
+
+    # AI analysis
     ai_analysis: Optional[str] = None
     ai_solution: Optional[str] = None
     resolution_runbook: Optional[str] = None
     ai_model_used: Optional[str] = None
+
+    # RCA fields
+    incident_group_id: Optional[str] = None
+    root_cause: Optional[str] = None
+    root_cause_category: Optional[str] = None
+    confidence_score: Optional[float] = None
+    affected_component: Optional[str] = None
+
+    # Recommendation fields
+    immediate_resolution: Optional[str] = None
+    preventive_action: Optional[str] = None
+    business_impact: Optional[str] = None
+    estimated_resolution_minutes: Optional[int] = None
+    owner_team: Optional[str] = None
+
+    # Tracking
     historical_match_count: int = 0
     email_sent: bool = False
     email_sent_at: Optional[datetime] = None

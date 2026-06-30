@@ -44,14 +44,24 @@ async def toggle_pipeline(body: dict = {}):
 
 
 @router.post("/run")
-async def manual_run():
-    """Trigger a manual pipeline run."""
+async def manual_run(body: dict = {}):
+    """Trigger a manual pipeline run with optional date range."""
     if not is_pipeline_enabled():
         return {"status": "error", "message": "Pipeline is disabled. Enable it first."}
 
+    start_date = body.get("start_date")  # ISO format: "2026-06-20T00:00:00"
+    end_date = body.get("end_date")      # ISO format: "2026-06-26T23:59:59"
+
     import asyncio
-    asyncio.create_task(run_pipeline(trigger_type="manual"))
-    return {"status": "started", "message": "Pipeline run started"}
+    asyncio.create_task(run_pipeline(
+        trigger_type="manual",
+        start_date=start_date,
+        end_date=end_date,
+    ))
+    return {
+        "status": "started",
+        "message": f"Pipeline run started{f' ({start_date} to {end_date})' if start_date else ''}",
+    }
 
 
 @router.get("/thresholds")

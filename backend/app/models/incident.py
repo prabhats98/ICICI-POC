@@ -6,6 +6,8 @@ import uuid
 import enum
 from datetime import datetime
 
+from sqlalchemy import Float
+
 from sqlalchemy import (
     Boolean,
     Column,
@@ -58,6 +60,22 @@ class Incident(Base):
         index=True,
     )
     source_service = Column(String(255), nullable=True)  # azure-front-door, azure-app-gateway, etc.
+
+    # Incident group link
+    incident_group_id = Column(String(36), nullable=True, index=True)
+
+    # Root cause analysis (denormalized for quick access)
+    root_cause = Column(Text, nullable=True)
+    root_cause_category = Column(String(255), nullable=True)
+    confidence_score = Column(Float, nullable=True)
+    affected_component = Column(String(255), nullable=True)  # UI/Frontend, Backend, Network, WAF
+
+    # Structured recommendation (denormalized for quick access)
+    immediate_resolution = Column(Text, nullable=True)
+    preventive_action = Column(Text, nullable=True)
+    business_impact = Column(Text, nullable=True)
+    estimated_resolution_minutes = Column(Integer, nullable=True)
+    owner_team = Column(String(255), nullable=True)
 
     # Related log IDs
     log_ids = Column(JSON, nullable=True)

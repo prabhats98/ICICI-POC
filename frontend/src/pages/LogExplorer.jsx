@@ -39,7 +39,8 @@ export default function LogExplorer() {
   const formatDate = (d) => d ? new Date(d).toLocaleString() : 'N/A';
 
   const handleExport = (format) => {
-    window.open(`http://localhost:8000/api/export/logs?format=${format}`, '_blank');
+    const apiBase = window.location.hostname === 'localhost' ? 'http://localhost:8001' : `http://${window.location.hostname}`;
+    window.open(`${apiBase}/api/export/logs?format=${format}`, '_blank');
   };
 
   return (

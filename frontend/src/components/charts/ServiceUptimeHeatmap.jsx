@@ -1,117 +1,78 @@
 /**
- * ServiceUptimeHeatmap — 30-day grid heatmap per service.
- * Each cell = 1 day, colored by max incident severity that day.
+ * ServiceUptimeHeatmap — Shows service uptime as a colored heatmap grid.
+ * Handles API format: heatmapData = [{date, service, count, max_severity, P1, P2, P3}, ...]
  */
-
-import { useState } from 'react';
-
-const SERVICE_DISPLAY = {
-  'azure-front-door': { label: 'Front Door', icon: '🌐' },
-  'azure-app-gateway': { label: 'App Gateway', icon: '🔀' },
-  'azure-apim': { label: 'API Mgmt', icon: '⚙️' },
-  'azure-vm': { label: 'VM', icon: '🖥️' },
-};
-
-const SEVERITY_COLORS = {
-  P1: { bg: 'rgba(239,68,68,0.7)', border: '#ef4444', label: 'P1 Critical' },
-  P2: { bg: 'rgba(245,158,11,0.5)', border: '#f59e0b', label: 'P2 Warning' },
-  P3: { bg: 'rgba(99,102,241,0.35)', border: '#6366f1', label: 'P3 Info' },
-  null: { bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.3)', label: 'No incidents' },
-};
-
 export default function ServiceUptimeHeatmap({ heatmapData = [], services = [], days = 30 }) {
-  const [tooltip, setTooltip] = useState(null);
+  if (!heatmapData || heatmapData.length === 0 || !services || services.length === 0) {
+    return (
+      <div className="empty-state" style={{ padding: 24 }}>
+        <div className="empty-state-icon">🗓️</div>
+        <div className="empty-state-title">No uptime data</div>
+        <div className="empty-state-text">Service uptime data will appear over time</div>
+      </div>
+    );
+  }
 
-  // Group by service
-  const byService = {};
-  services.forEach((svc) => { byService[svc] = []; });
-  heatmapData.forEach((cell) => {
-    if (byService[cell.service]) {
-      byService[cell.service].push(cell);
+  // Build a lookup: service -> date -> severity level
+  const serviceMap = {};
+  const allDates = [...new Set(heatmapData.map((d) => d.date))].sort();
+
+  services.forEach((svc) => { serviceMap[svc] = {}; });
+
+  heatmapData.forEach((item) => {
+    if (serviceMap[item.service]) {
+      const severity = item.P1 > 0 ? 3 : item.P2 > 0 ? 2 : item.P3 > 0 ? 1 : 0;
+      serviceMap[item.service][item.date] = severity;
     }
   });
 
+  const getColor = (severity) => {
+    if (severity === 0) return '#dcfce7';
+    if (severity === 1) return '#fef9c3';
+    if (severity === 2) return '#fed7aa';
+    return '#fecaca';
+  };
+
+  const serviceLabels = {
+    'azure-front-door': 'Front Door',
+    'azure-app-gateway': 'App Gateway',
+    'azure-apim': 'API Mgmt',
+    'azure-vm': 'Virtual Machine',
+  };
+
   return (
     <div className="uptime-heatmap">
-      <div className="uptime-heatmap-grid">
-        {services.map((svc) => {
-          const display = SERVICE_DISPLAY[svc] || { label: svc, icon: '☁️' };
-          const cells = byService[svc] || [];
-
-          return (
-            <div key={svc} className="uptime-heatmap-row">
-              <div className="uptime-heatmap-label" title={display.label}>
-                <span className="uptime-heatmap-icon">{display.icon}</span>
-                <span className="uptime-heatmap-name">{display.label}</span>
-              </div>
-              <div className="uptime-heatmap-cells">
-                {cells.map((cell, i) => {
-                  const severity = cell.count > 0 ? cell.max_severity : null;
-                  const colors = SEVERITY_COLORS[severity] || SEVERITY_COLORS[null];
-                  const dateLabel = new Date(cell.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-                  return (
-                    <div
-                      key={`${svc}-${i}`}
-                      className="uptime-heatmap-cell"
-                      style={{
-                        background: colors.bg,
-                        borderColor: cell.count > 0 ? colors.border : 'transparent',
-                      }}
-                      onMouseEnter={(e) => setTooltip({
-                        x: e.clientX,
-                        y: e.clientY,
-                        date: dateLabel,
-                        service: display.label,
-                        count: cell.count,
-                        severity: colors.label,
-                        p1: cell.P1,
-                        p2: cell.P2,
-                        p3: cell.P3,
-                      })}
-                      onMouseLeave={() => setTooltip(null)}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Legend */}
-      <div className="uptime-heatmap-legend">
-        <span className="uptime-heatmap-legend-label">Less</span>
-        {[null, 'P3', 'P2', 'P1'].map((sev) => {
-          const colors = SEVERITY_COLORS[sev];
-          return (
-            <div
-              key={sev || 'none'}
-              className="uptime-heatmap-legend-cell"
-              style={{ background: colors.bg }}
-              title={colors.label}
-            />
-          );
-        })}
-        <span className="uptime-heatmap-legend-label">More</span>
-      </div>
-
-      {/* Tooltip */}
-      {tooltip && (
-        <div className="uptime-heatmap-tooltip" style={{
-          left: tooltip.x + 12,
-          top: tooltip.y - 80,
-        }}>
-          <div className="uptime-tooltip-date">{tooltip.date}</div>
-          <div className="uptime-tooltip-service">{tooltip.service}</div>
-          <div className="uptime-tooltip-severity">{tooltip.severity}</div>
-          {tooltip.count > 0 && (
-            <div className="uptime-tooltip-breakdown">
-              P1: {tooltip.p1} · P2: {tooltip.p2} · P3: {tooltip.p3}
-            </div>
-          )}
+      {services.map((service) => (
+        <div key={service} className="heatmap-row">
+          <div className="heatmap-label">{serviceLabels[service] || service}</div>
+          <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            {allDates.map((date) => {
+              const severity = serviceMap[service]?.[date] ?? 0;
+              return (
+                <div
+                  key={date}
+                  className="heatmap-cell"
+                  style={{ background: getColor(severity) }}
+                  title={`${serviceLabels[service] || service} — ${date}: ${severity === 0 ? 'No issues' : severity === 1 ? 'P3' : severity === 2 ? 'P2' : 'P1'}`}
+                />
+              );
+            })}
+          </div>
         </div>
-      )}
+      ))}
+      <div style={{ display: 'flex', gap: 12, marginTop: 8, justifyContent: 'flex-end' }}>
+        {[
+          { label: 'No issues', color: '#dcfce7' },
+          { label: 'P3', color: '#fef9c3' },
+          { label: 'P2', color: '#fed7aa' },
+          { label: 'P1', color: '#fecaca' },
+        ].map((l) => (
+          <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#64748b' }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color }} />
+            {l.label}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

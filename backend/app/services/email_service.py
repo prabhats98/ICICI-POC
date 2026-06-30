@@ -1,6 +1,6 @@
 """
-Email Service — Sends alert emails via SMTP or Azure Communication Services.
-Channel selection is driven by NOTIFICATION_CHANNEL in .env.
+Email Service — Sends alert emails via SMTP, Azure Communication Services,
+or Microsoft Graph API. Channel selection is driven by NOTIFICATION_CHANNEL in .env.
 """
 
 import logging
@@ -16,7 +16,7 @@ settings = get_settings()
 
 
 class EmailService:
-    """Unified email service supporting SMTP and Azure Communication Services."""
+    """Unified email service supporting SMTP, ACS, and Microsoft Graph API."""
 
     def __init__(self):
         self.host = settings.smtp_host
@@ -39,10 +39,21 @@ class EmailService:
     ) -> bool:
         """
         Send an alert email using the configured channel.
-        Tries Azure Communication Services first if configured, falls back to SMTP.
+        Supports: graph_api, azure_communication_service, smtp.
         """
         recipient = to_email or self.default_to_email
         channel = settings.notification_channel
+
+        # Try Microsoft Graph API
+        if channel == "graph_api":
+            try:
+                from app.services.graph_email_service import graph_email_service
+                sent = await graph_email_service.send_email(recipient, subject, html_body)
+                if sent:
+                    return True
+                logger.warning("Graph API failed, attempting SMTP fallback...")
+            except Exception as e:
+                logger.warning(f"Graph API unavailable ({e}), attempting SMTP fallback...")
 
         # Try Azure Communication Services
         if channel == "azure_communication_service":
@@ -105,4 +116,3 @@ class EmailService:
 
 # Singleton
 email_service = EmailService()
-

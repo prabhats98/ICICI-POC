@@ -57,13 +57,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route
           path="/login"
-          element={
-            isAuthenticated ? (
-              <Navigate to="/dashboard" replace />
-            ) : (
-              <LoginPage />
-            )
-          }
+          element={<LoginPage />}
         />
 
         {/* Protected routes — all dashboard pages */}

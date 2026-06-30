@@ -55,6 +55,9 @@ async def _generate_email_content(notification: dict) -> dict:
     except Exception as e:
         logger.warning(f"Email body generation failed for {notification.get('title', '?')}: {e}")
         # Fallback: use a simple template
+        time_info = ""
+        if notification.get('incident_time_range'):
+            time_info = f"<p><strong>Incident Date/Time:</strong> {notification.get('incident_time_range')}</p>"
         return {
             "notification": notification,
             "subject": f"[{notification.get('priority', '?')}] {notification.get('title', 'Incident Alert')}",
@@ -62,6 +65,7 @@ async def _generate_email_content(notification: dict) -> dict:
                 f"<h2>{notification.get('title', 'Incident Alert')}</h2>"
                 f"<p><strong>Priority:</strong> {notification.get('priority', '?')}</p>"
                 f"<p><strong>Service:</strong> {notification.get('source_service', '?')}</p>"
+                f"{time_info}"
                 f"<p>{notification.get('description', '')}</p>"
                 f"<p><strong>Recommended Fix:</strong> {notification.get('solution', 'N/A')}</p>"
             ),
@@ -138,6 +142,68 @@ async def notification_agent_node(state: PipelineState) -> dict[str, Any]:
             "email_failures": [],
             "current_agent": "notification_agent",
         }
+
+    # ── Handle "Healthy" notifications (no incidents found) ──
+    healthy_notifs = [n for n in email_notifications if n.get("is_healthy")]
+    incident_notifs = [n for n in email_notifications if not n.get("is_healthy")]
+
+    healthy_sent = []
+    for healthy in healthy_notifs:
+        time_range = healthy.get("incident_time_range", "")
+        level_counts = healthy.get("level_counts", {})
+        logs_analyzed = healthy.get("logs_analyzed", 0)
+        desc = healthy.get("description", "")
+
+        level_rows = ""
+        for lvl, cnt in level_counts.items():
+            color = {"ERROR": "#ef4444", "CRITICAL": "#dc2626", "WARNING": "#f59e0b", "INFO": "#10b981"}.get(lvl, "#64748b")
+            level_rows += f'<tr><td style="padding:6px 12px;color:{color};font-weight:700">{lvl}</td><td style="padding:6px 12px">{cnt}</td></tr>'
+
+        html_body = f"""
+        <div style="font-family:Inter,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">
+          <div style="background:linear-gradient(135deg,#10b981,#059669);padding:28px 32px;text-align:center">
+            <div style="font-size:36px;margin-bottom:8px">✅</div>
+            <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800">All Systems Healthy</h1>
+            <p style="color:rgba(255,255,255,0.85);font-size:13px;margin:6px 0 0">CloudGuard AI Pipeline — Health Report</p>
+          </div>
+          <div style="padding:24px 32px">
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin-bottom:20px">
+              <p style="color:#166534;font-size:14px;font-weight:600;margin:0 0 8px">🎯 No incidents detected</p>
+              <p style="color:#15803d;font-size:13px;margin:0;line-height:1.5">{desc}</p>
+            </div>
+            {"<p style='font-size:12px;color:#64748b;margin-bottom:12px'><strong>Time Range:</strong> " + time_range + "</p>" if time_range else ""}
+            <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
+              <tr style="background:#f8fafc"><th style="text-align:left;padding:8px 12px;color:#334155">Log Level</th><th style="text-align:left;padding:8px 12px;color:#334155">Count</th></tr>
+              {level_rows if level_rows else '<tr><td style="padding:6px 12px" colspan="2">No logs in this time range</td></tr>'}
+              <tr style="border-top:1px solid #e2e8f0"><td style="padding:8px 12px;font-weight:700;color:#0f172a">Total Analyzed</td><td style="padding:8px 12px;font-weight:700">{logs_analyzed}</td></tr>
+            </table>
+            <p style="font-size:11px;color:#94a3b8;text-align:center;margin-top:20px">CloudGuard by KR Elixir Technology — Automated Health Report</p>
+          </div>
+        </div>
+        """
+
+        try:
+            sent = await email_service.send_alert_email(
+                subject=f"✅ CloudGuard Health Report — All Systems Healthy ({time_range})" if time_range else "✅ CloudGuard — All Systems Healthy",
+                html_body=html_body,
+            )
+            if sent:
+                logger.info("Agent 8 [Notification]: ✅ Healthy status email sent")
+                healthy_sent.append("__healthy__")
+            else:
+                logger.warning("Agent 8 [Notification]: ❌ Healthy status email failed")
+        except Exception as e:
+            logger.error(f"Agent 8 [Notification]: Healthy email error: {e}")
+
+    # If only healthy notifications, return early
+    if not incident_notifs:
+        return {
+            "emails_sent": healthy_sent,
+            "email_failures": [],
+            "current_agent": "notification_agent",
+        }
+
+    email_notifications = incident_notifs
 
     # ── Step 1: Generate all email bodies concurrently ──
     logger.info(f"Agent 8 [Notification]: Generating {len(email_notifications)} email bodies concurrently...")

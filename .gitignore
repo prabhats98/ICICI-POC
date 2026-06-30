@@ -1,56 +1,73 @@
-# Environment
-.env
-*.env.local
-
-# GCP Service Account Key
-service-account-key.json
-
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv/
-build/
-dist/
+*.pyo
 *.egg-info/
+dist/
+build/
 *.egg
 
-# Node
-node_modules/
-frontend/node_modules/
+# Virtual environment
+backend/venv/
+venv/
 
-# Build outputs
+# Node
+frontend/node_modules/
+frontend/node-v22.16.0-win-x64/
+
+# Build output (generated from source)
 frontend/dist/
-backend/exports/
+backend/static/assets/
+
+# Database (local only)
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+
+# Environment & secrets
+.env
+*.env
+backend/.env
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# OS
-.DS_Store
+# OS files
 Thumbs.db
-
-# Alembic
-backend/alembic/versions/*.pyc
+Desktop.ini
+.DS_Store
 
 # Logs
 *.log
-logs/
 
-# SQLite WAL/SHM
-*.db-shm
-*.db-wal
+# Temp files
+*.tmp
+*.bak
 
-# Zip artifacts
-*.zip
+# Antigravity
+.agents/
 
-# Scripts output
-backend/scripts/__pycache__/
+backend/service-account-key.json
+backend/check_azure_data.py
+backend/check_volume.py
+backend/find_acs.py
+backend/pull_raw_logs_2months.py
+backend/test_graph_email.py
+backend/.env
+*.json.key
+
+backend/generate_report.py
+backend/pull_logs.py
+backend/pull_error_logs.py
+backend/test_azure_credentials.py
+backend/test_blob_aug.py
+backend/test_e2e.py
+backend/debug_key.py
+backend/fix_key.py
+backend/run_and_export.py
+backend/investigate_db.py
+backend/wait_pipeline.py
+backend/check_dash.py

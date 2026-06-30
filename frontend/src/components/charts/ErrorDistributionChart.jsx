@@ -1,132 +1,84 @@
 /**
- * ErrorDistributionChart — Doughnut chart for incident categories
- * (Security, Performance, Availability, etc.) with center total and scrollable side legend.
+ * ErrorDistributionChart — Doughnut chart showing error categories.
+ * Light theme with vibrant colors.
  */
-
 import { Doughnut } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  ArcElement,
-  Tooltip,
-  Legend,
-} from 'chart.js';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
-const CATEGORY_COLORS = [
-  '#6366f1', // indigo
-  '#f43f5e', // rose
-  '#f59e0b', // amber
-  '#10b981', // emerald
-  '#06b6d4', // cyan
-  '#8b5cf6', // violet
-  '#3b82f6', // blue
-  '#ec4899', // pink
-  '#14b8a6', // teal
-  '#a855f7', // purple
+const COLORS = [
+  '#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6',
+  '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#6366f1',
 ];
 
 export default function ErrorDistributionChart({ distribution = [], total = 0 }) {
-  const labels = distribution.map((d) => d.category);
-  const values = distribution.map((d) => d.count);
-  const colors = distribution.map((_, i) => CATEGORY_COLORS[i % CATEGORY_COLORS.length]);
+  if (!distribution || distribution.length === 0) {
+    return (
+      <div className="empty-state" style={{ padding: 24 }}>
+        <div className="empty-state-icon">📋</div>
+        <div className="empty-state-title">No error data</div>
+        <div className="empty-state-text">Errors will appear after pipeline runs</div>
+      </div>
+    );
+  }
 
   const chartData = {
-    labels,
-    datasets: [
-      {
-        data: values,
-        backgroundColor: colors.map((c) => c + '33'),
-        borderColor: colors,
-        borderWidth: 2,
-        hoverBackgroundColor: colors.map((c) => c + '66'),
-        hoverBorderWidth: 3,
-        spacing: 2,
-        borderRadius: 4,
-      },
-    ],
+    labels: distribution.map((d) => d.category || 'Unknown'),
+    datasets: [{
+      data: distribution.map((d) => d.count),
+      backgroundColor: COLORS.slice(0, distribution.length),
+      borderColor: '#ffffff',
+      borderWidth: 3,
+      hoverOffset: 8,
+    }],
   };
 
   const options = {
     responsive: true,
     maintainAspectRatio: false,
-    cutout: '68%',
+    cutout: '60%',
     plugins: {
-      legend: { display: false },
+      legend: {
+        position: 'right',
+        labels: {
+          color: '#334155',
+          font: { size: 12, weight: '500' },
+          padding: 14,
+          usePointStyle: true,
+          pointStyleWidth: 8,
+          generateLabels: (chart) => {
+            const data = chart.data;
+            return data.labels.map((label, i) => ({
+              text: `${label} (${data.datasets[0].data[i]})`,
+              fillStyle: data.datasets[0].backgroundColor[i],
+              strokeStyle: '#fff',
+              lineWidth: 0,
+              pointStyle: 'circle',
+              index: i,
+            }));
+          },
+        },
+      },
       tooltip: {
-        backgroundColor: 'rgba(17, 24, 39, 0.95)',
-        borderColor: 'rgba(255,255,255,0.1)',
-        borderWidth: 1,
-        titleColor: '#f1f5f9',
-        bodyColor: '#94a3b8',
+        backgroundColor: '#0f172a',
+        titleColor: '#fff',
+        bodyColor: '#e2e8f0',
         padding: 12,
         cornerRadius: 8,
-        titleFont: { size: 13, weight: '600', family: 'Inter' },
-        bodyFont: { size: 12, family: 'Inter' },
         callbacks: {
           label: (ctx) => {
-            const pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
-            return ` ${ctx.label}: ${ctx.raw} (${pct}%)`;
+            const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+            return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
           },
         },
       },
     },
   };
 
-  // Center text plugin
-  const centerTextPlugin = {
-    id: 'centerText',
-    beforeDraw(chart) {
-      const { ctx, width, height } = chart;
-      ctx.save();
-      ctx.font = '800 28px Inter';
-      ctx.fillStyle = '#f1f5f9';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(total.toLocaleString(), width / 2, height / 2 - 8);
-      ctx.font = '500 11px Inter';
-      ctx.fillStyle = '#64748b';
-      ctx.fillText('TOTAL', width / 2, height / 2 + 14);
-      ctx.restore();
-    },
-  };
-
-  // Show top 8 in legend, rest grouped into "Others"
-  const MAX_LEGEND = 8;
-  const legendItems = distribution.length > MAX_LEGEND
-    ? [
-        ...distribution.slice(0, MAX_LEGEND),
-        {
-          category: `+${distribution.length - MAX_LEGEND} more`,
-          count: distribution.slice(MAX_LEGEND).reduce((s, d) => s + d.count, 0),
-          percentage: distribution.slice(MAX_LEGEND).reduce((s, d) => s + d.percentage, 0).toFixed(1),
-          _isOther: true,
-        },
-      ]
-    : distribution;
-
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 16, height: 260 }}>
-      <div style={{ flex: '0 0 190px', height: 190, position: 'relative' }}>
-        <Doughnut data={chartData} options={options} plugins={[centerTextPlugin]} />
-      </div>
-      <div className="doughnut-legend" style={{ maxHeight: 250, overflowY: 'auto' }}>
-        {legendItems.map((d, i) => (
-          <div key={d.category} className="doughnut-legend-item" title={d.category}>
-            <span
-              className="doughnut-legend-dot"
-              style={{
-                background: d._isOther
-                  ? 'var(--text-muted)'
-                  : CATEGORY_COLORS[i % CATEGORY_COLORS.length],
-              }}
-            />
-            <span className="doughnut-legend-label">{d.category || 'Unknown'}</span>
-            <span className="doughnut-legend-value">{d.count}</span>
-            <span className="doughnut-legend-pct">{d.percentage}%</span>
-          </div>
-        ))}
-      </div>
+    <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Doughnut data={chartData} options={options} />
     </div>
   );
 }

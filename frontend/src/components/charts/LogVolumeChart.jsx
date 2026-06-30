@@ -1,105 +1,103 @@
 /**
- * LogVolumeChart — Multi-line chart for log levels (CRITICAL, ERROR, WARNING, INFO) over time.
- * Lines with gradient area fills beneath each.
+ * LogVolumeChart — Stacked area chart showing log volume by level.
+ * Light theme with vibrant fills.
  */
-
 import { Line } from 'react-chartjs-2';
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Filler,
-  Tooltip,
-  Legend,
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement,
+  LineElement, Tooltip, Legend, Filler,
 } from 'chart.js';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend);
-
-const LEVEL_CONFIG = {
-  CRITICAL: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.10)' },
-  ERROR: { color: '#f43f5e', bg: 'rgba(244, 63, 94, 0.10)' },
-  WARNING: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)' },
-  INFO: { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)' },
-};
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
 export default function LogVolumeChart({ data = [] }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="empty-state" style={{ padding: 24 }}>
+        <div className="empty-state-icon">📈</div>
+        <div className="empty-state-title">No volume data</div>
+        <div className="empty-state-text">Log volume will appear after ingestion</div>
+      </div>
+    );
+  }
+
   const labels = data.map((d) => {
-    const date = new Date(d.date);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dt = new Date(d.date);
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   });
 
   const chartData = {
     labels,
-    datasets: Object.entries(LEVEL_CONFIG).map(([level, cfg]) => ({
-      label: level,
-      data: data.map((d) => d[level] || 0),
-      borderColor: cfg.color,
-      backgroundColor: cfg.bg,
-      fill: true,
-      tension: 0.4,
-      borderWidth: 2,
-      pointRadius: 2,
-      pointBackgroundColor: cfg.color,
-      pointBorderColor: 'transparent',
-      pointHoverRadius: 5,
-      pointHoverBackgroundColor: cfg.color,
-      pointHoverBorderColor: cfg.bg,
-      pointHoverBorderWidth: 4,
-    })),
+    datasets: [
+      {
+        label: 'Error',
+        data: data.map((d) => d.ERROR || 0),
+        borderColor: '#ef4444',
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: '#ef4444',
+      },
+      {
+        label: 'Warning',
+        data: data.map((d) => d.WARNING || 0),
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: '#f59e0b',
+      },
+      {
+        label: 'Info',
+        data: data.map((d) => d.INFO || 0),
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: '#3b82f6',
+      },
+    ],
   };
 
   const options = {
     responsive: true,
     maintainAspectRatio: false,
-    interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: {
-        display: true,
         position: 'top',
-        align: 'end',
-        labels: {
-          color: '#94a3b8',
-          font: { size: 11, family: 'Inter' },
-          usePointStyle: true,
-          pointStyle: 'circle',
-          boxWidth: 8,
-          boxHeight: 8,
-          padding: 16,
-        },
+        labels: { color: '#334155', font: { size: 12, weight: '600' }, padding: 16, usePointStyle: true },
       },
       tooltip: {
-        backgroundColor: 'rgba(17, 24, 39, 0.95)',
-        borderColor: 'rgba(255,255,255,0.1)',
-        borderWidth: 1,
-        titleColor: '#f1f5f9',
-        bodyColor: '#94a3b8',
+        backgroundColor: '#0f172a',
+        titleColor: '#fff',
+        bodyColor: '#e2e8f0',
         padding: 12,
         cornerRadius: 8,
-        titleFont: { size: 13, weight: '600', family: 'Inter' },
-        bodyFont: { size: 12, family: 'Inter' },
-        displayColors: true,
-        boxPadding: 4,
       },
     },
     scales: {
       x: {
-        grid: { color: 'rgba(255,255,255,0.04)', drawBorder: false },
-        ticks: { color: '#64748b', font: { size: 11, family: 'Inter' } },
-        border: { display: false },
+        ticks: { color: '#64748b', font: { size: 11 } },
+        grid: { color: 'rgba(0, 0, 0, 0.04)' },
+        border: { color: '#e2e8f0' },
       },
       y: {
+        ticks: { color: '#64748b', font: { size: 11 } },
+        grid: { color: 'rgba(0, 0, 0, 0.04)' },
+        border: { color: '#e2e8f0' },
         beginAtZero: true,
-        grid: { color: 'rgba(255,255,255,0.04)', drawBorder: false },
-        ticks: { color: '#64748b', font: { size: 11, family: 'Inter' } },
-        border: { display: false },
       },
     },
   };
 
   return (
-    <div style={{ height: 280, position: 'relative' }}>
+    <div style={{ height: 260 }}>
       <Line data={chartData} options={options} />
     </div>
   );

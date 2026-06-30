@@ -30,6 +30,11 @@ async def orchestrator_agent_node(state: PipelineState) -> dict[str, Any]:
     p3 = state.get("p3_incidents", [])
     resolutions = state.get("resolutions", [])
 
+    # Date/time range for when the incident occurred (from pipeline input)
+    start_date = state.get("start_date", "")
+    end_date = state.get("end_date", "")
+    incident_time_range = f"{start_date} to {end_date}" if start_date and end_date else ""
+
     logger.info(
         f"Agent 7 [Orchestrator]: Coordinating — "
         f"P1={len(p1)}, P2={len(p2)}, P3={len(p3)}, Resolutions={len(resolutions)}"
@@ -54,7 +59,26 @@ async def orchestrator_agent_node(state: PipelineState) -> dict[str, Any]:
             "description": incident.get("description", ""),
             "category": incident.get("category", ""),
             "affected_service": incident.get("affected_service", ""),
+            "source_service": incident.get("affected_service", "Unknown"),
             "solution": resolution.get("solution", "Resolution pending"),
+            # Incident date/time
+            "incident_time_range": incident_time_range,
+            "start_date": start_date,
+            "end_date": end_date,
+            # RCA data
+            "root_cause": incident.get("root_cause", "Under investigation"),
+            "root_cause_category": incident.get("root_cause_category", ""),
+            "confidence_score": incident.get("confidence_score", 0),
+            "affected_component": incident.get("affected_component", ""),
+            "owner_team": incident.get("owner_team", ""),
+            "business_impact": incident.get("business_impact", ""),
+            "immediate_resolution": incident.get("immediate_resolution", ""),
+            "preventive_action": incident.get("preventive_action", ""),
+            "incident_type": incident.get("incident_type", ""),
+            "sample_logs": incident.get("sample_logs", []),
+            "resource_id": incident.get("resource_id", ""),
+            "sample_endpoint": incident.get("sample_endpoint", ""),
+            "affected_urls": incident.get("affected_urls", []),
             "send_email": True,
         })
 
@@ -68,7 +92,26 @@ async def orchestrator_agent_node(state: PipelineState) -> dict[str, Any]:
             "description": incident.get("description", ""),
             "category": incident.get("category", ""),
             "affected_service": incident.get("affected_service", ""),
+            "source_service": incident.get("affected_service", "Unknown"),
             "solution": resolution.get("solution", "Resolution pending"),
+            # Incident date/time
+            "incident_time_range": incident_time_range,
+            "start_date": start_date,
+            "end_date": end_date,
+            # RCA data
+            "root_cause": incident.get("root_cause", "Under investigation"),
+            "root_cause_category": incident.get("root_cause_category", ""),
+            "confidence_score": incident.get("confidence_score", 0),
+            "affected_component": incident.get("affected_component", ""),
+            "owner_team": incident.get("owner_team", ""),
+            "business_impact": incident.get("business_impact", ""),
+            "immediate_resolution": incident.get("immediate_resolution", ""),
+            "preventive_action": incident.get("preventive_action", ""),
+            "incident_type": incident.get("incident_type", ""),
+            "sample_logs": incident.get("sample_logs", []),
+            "resource_id": incident.get("resource_id", ""),
+            "sample_endpoint": incident.get("sample_endpoint", ""),
+            "affected_urls": incident.get("affected_urls", []),
             "send_email": True,
         })
 
@@ -84,6 +127,32 @@ async def orchestrator_agent_node(state: PipelineState) -> dict[str, Any]:
             "send_email": False,
         })
 
+    # If no incidents at all, send a "healthy" email
+    total_incidents = len(p1) + len(p2) + len(p3)
+    if total_incidents == 0 and state.get("total_collected", 0) > 0:
+        notifications_to_send.append({
+            "incident_id": "__healthy__",
+            "title": "CloudGuard — All Systems Healthy",
+            "priority": "HEALTHY",
+            "description": (
+                f"CloudGuard analyzed {state.get('total_collected', 0)} Azure logs "
+                f"from {len(state.get('per_source', {}))} sources "
+                f"({', '.join(f'{k}: {v}' for k, v in state.get('per_source', {}).items())}). "
+                f"No critical, high, or medium severity issues were detected. "
+                f"All monitored Azure services are operating normally."
+            ),
+            "category": "Health Check",
+            "source_service": "All Azure Services",
+            "solution": "No action required — continue monitoring.",
+            "incident_time_range": incident_time_range,
+            "start_date": start_date,
+            "end_date": end_date,
+            "send_email": True,
+            "is_healthy": True,
+            "logs_analyzed": state.get("logs_analyzed", 0),
+            "level_counts": state.get("level_counts", {}),
+        })
+
     # Build summary
     summary = {
         "total_collected": state.get("total_collected", 0),
@@ -95,7 +164,7 @@ async def orchestrator_agent_node(state: PipelineState) -> dict[str, Any]:
         "p1_count": len(p1),
         "p2_count": len(p2),
         "p3_count": len(p3),
-        "total_incidents": len(p1) + len(p2) + len(p3),
+        "total_incidents": total_incidents,
         "resolutions_generated": len([r for r in resolutions if not r.get("error")]),
         "emails_to_send": len([n for n in notifications_to_send if n.get("send_email")]),
         "level_counts": state.get("level_counts", {}),

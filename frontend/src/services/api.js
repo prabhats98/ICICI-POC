@@ -5,7 +5,9 @@
 
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = window.location.hostname === 'localhost'
+  ? 'http://localhost:8001'
+  : `http://${window.location.hostname}`;
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -29,9 +31,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Don't redirect if we're already on auth routes
-      const isAuthRoute = error.config?.url?.includes('/api/auth/');
-      if (!isAuthRoute) {
+      // Don't redirect if we're on auth routes or public analytics routes
+      const url = error.config?.url || '';
+      const isAuthRoute = url.includes('/api/auth/');
+      const isPublicRoute = url.includes('/api/analytics/') || url.includes('/api/dashboard') || url.includes('/api/health/') || url.includes('/api/incidents') || url.includes('/api/agents');
+      if (!isAuthRoute && !isPublicRoute) {
         localStorage.removeItem('cloudguard_token');
         window.location.href = '/login';
       }
@@ -68,7 +72,7 @@ export const getAgentHistory = (params) => api.get('/api/agents/history', { para
 // --- Pipeline Control ---
 export const getPipelineStatus = () => api.get('/api/pipeline/status');
 export const togglePipeline = (enabled) => api.post('/api/pipeline/toggle', { enabled });
-export const triggerManualRun = () => api.post('/api/pipeline/run');
+export const triggerManualRun = (dateRange = {}) => api.post('/api/pipeline/run', dateRange);
 export const getPipelineThresholds = () => api.get('/api/pipeline/thresholds');
 export const updatePipelineThresholds = (data) => api.put('/api/pipeline/thresholds', data);
 
@@ -107,10 +111,22 @@ export const getSLOStatus = () => api.get('/api/analytics/slo-status');
 export const getServiceUptime = (days = 30) => api.get(`/api/analytics/service-uptime?days=${days}`);
 export const getKPITrends = (days = 7) => api.get(`/api/analytics/kpi-trends?days=${days}`);
 
+// --- RCA & Recommendation Analytics ---
+export const getRootCauseDistribution = (days = 30) => api.get(`/api/analytics/root-cause-distribution?days=${days}`);
+export const getComponentBreakdown = (days = 30) => api.get(`/api/analytics/component-breakdown?days=${days}`);
+export const getResolutionMetrics = (days = 30) => api.get(`/api/analytics/resolution-metrics?days=${days}`);
+export const getIncidentGroups = (days = 30) => api.get(`/api/analytics/incident-groups?days=${days}`);
+export const getRCADetails = (days = 30) => api.get(`/api/analytics/rca-details?days=${days}`);
+
 // --- WebSocket ---
 export const createWebSocket = () => {
-  const ws = new WebSocket('ws://localhost:8000/ws/pipeline');
+  const ws = new WebSocket('ws://localhost:8001/ws/pipeline');
   return ws;
 };
+
+// --- Health Check ---
+export const getServiceHealthChecks = () => api.get('/api/health/services');
+export const getHealthHistory = () => api.get('/api/health/history');
+export const sendDowntimeNotification = (recipientEmail) => api.post('/api/health/notify-downtime', { recipient_email: recipientEmail || null });
 
 export default api;

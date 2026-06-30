@@ -1,8 +1,8 @@
 """
-Pipeline State — Shared state definition for the 8-agent LangGraph pipeline.
+Pipeline State — Shared state definition for the 9-agent LangGraph pipeline.
 
-Flow: Log Collector → Preprocessing → Classification → Priority
-      → Context → Resolution → Orchestrator → Notification
+Flow: Log Collector → Preprocessing → Classification → RCA
+      → Priority → Context → Resolution → Orchestrator → Notification
 """
 
 from typing import TypedDict, Any
@@ -15,6 +15,8 @@ class PipelineState(TypedDict, total=False):
     run_id: str
     trigger_type: str  # "scheduler" or "manual"
     started_at: str
+    start_date: str  # optional ISO date for on-demand runs
+    end_date: str    # optional ISO date for on-demand runs
     current_agent: str
     status: str  # "running", "completed", "failed"
 
@@ -34,6 +36,9 @@ class PipelineState(TypedDict, total=False):
     issues_found: list[dict[str, Any]]
     has_issues: bool
     logs_analyzed: int
+
+    # --- RCA Agent outputs ---
+    rca_results: list[dict[str, Any]]  # Issues enriched with root cause analysis
 
     # --- Priority Agent outputs ---
     classified_issues: list[dict[str, Any]]

@@ -1,5 +1,5 @@
 /**
- * WorkflowView Page — React Flow visualization of the 8-agent linear pipeline.
+ * WorkflowView Page — React Flow visualization of the 9-agent linear pipeline.
  * Features:
  *   - Live pipeline progress bar with step counter & timer
  *   - Animated node status transitions (idle → running → completed)
@@ -23,11 +23,12 @@ import useAppStore from '../store/useAppStore';
 import { getWorkflowState, triggerPipeline } from '../services/api';
 import NodeConfigModal from '../components/NodeConfigModal';
 
-// --- 8-agent pipeline steps ---
+// --- 9-agent pipeline steps ---
 const PIPELINE_STEPS = [
   'log_collector',
   'preprocessing_engine',
   'classification_agent',
+  'rca_agent',
   'priority_agent',
   'context_agent',
   'resolution_agent',
@@ -39,6 +40,7 @@ const STEP_LABELS = {
   log_collector: 'Collecting Logs',
   preprocessing_engine: 'Preprocessing',
   classification_agent: 'Classifying Incidents',
+  rca_agent: 'Root Cause Analysis',
   priority_agent: 'Assigning Priority',
   context_agent: 'Looking Up Context',
   resolution_agent: 'Generating Resolutions',
@@ -215,39 +217,45 @@ const initialNodes = [
     data: { label: 'Classification Agent', subtitle: 'Agent 3: Gemini incident detection', icon: '🔍', iconBg: 'rgba(244,63,94,0.2)', iconColor: '#f43f5e', status: 'idle', nodeId: 'classification_agent' },
   },
   {
-    id: 'priority_agent',
+    id: 'rca_agent',
     type: 'workflowNode',
     position: { x: 350, y: 440 },
+    data: { label: 'RCA Agent', subtitle: 'Agent 3.5: Root Cause Analysis', icon: '🎯', iconBg: 'rgba(167,139,250,0.2)', iconColor: '#a78bfa', status: 'idle', nodeId: 'rca_agent' },
+  },
+  {
+    id: 'priority_agent',
+    type: 'workflowNode',
+    position: { x: 350, y: 550 },
     data: { label: 'Priority Agent', subtitle: 'Agent 4: Assign P1 / P2 / P3', icon: '⚖️', iconBg: 'rgba(245,158,11,0.2)', iconColor: '#f59e0b', status: 'idle', nodeId: 'priority_agent' },
   },
   {
     id: 'context_agent',
     type: 'workflowNode',
-    position: { x: 350, y: 550 },
+    position: { x: 350, y: 660 },
     data: { label: 'Context Agent', subtitle: 'Agent 5: Historical incident lookup', icon: '📚', iconBg: 'rgba(139,92,246,0.2)', iconColor: '#8b5cf6', status: 'idle', nodeId: 'context_agent' },
   },
   {
     id: 'resolution_agent',
     type: 'workflowNode',
-    position: { x: 350, y: 660 },
+    position: { x: 350, y: 770 },
     data: { label: 'Resolution Agent', subtitle: 'Agent 6: Auto fix + runbook', icon: '💡', iconBg: 'rgba(59,130,246,0.2)', iconColor: '#3b82f6', status: 'idle', nodeId: 'resolution_agent' },
   },
   {
     id: 'orchestrator_agent',
     type: 'workflowNode',
-    position: { x: 350, y: 770 },
+    position: { x: 350, y: 880 },
     data: { label: 'Orchestrator Agent', subtitle: 'Agent 7: Coordinate & summarize', icon: '🎯', iconBg: 'rgba(236,72,153,0.2)', iconColor: '#ec4899', status: 'idle', nodeId: 'orchestrator_agent' },
   },
   {
     id: 'notification_agent',
     type: 'workflowNode',
-    position: { x: 350, y: 880 },
+    position: { x: 350, y: 990 },
     data: { label: 'Notification Agent', subtitle: 'Agent 8: Email alerts', icon: '📧', iconBg: 'rgba(239,68,68,0.2)', iconColor: '#ef4444', status: 'idle', nodeId: 'notification_agent' },
   },
   {
     id: 'end',
     type: 'workflowNode',
-    position: { x: 350, y: 990 },
+    position: { x: 350, y: 1100 },
     data: { label: 'End', subtitle: 'Pipeline complete', icon: '🏁', iconBg: 'rgba(100,116,139,0.2)', iconColor: '#64748b', status: 'idle', nodeId: 'end' },
   },
 ];
@@ -256,7 +264,8 @@ const initialEdges = [
   { id: 'e-start-lc', source: 'start', target: 'log_collector', animated: true, style: { stroke: 'var(--accent-emerald)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-emerald)' } },
   { id: 'e-lc-pp', source: 'log_collector', target: 'preprocessing_engine', animated: true, style: { stroke: 'var(--accent-indigo)' }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent-indigo)' } },
   { id: 'e-pp-ca', source: 'preprocessing_engine', target: 'classification_agent', animated: true, style: { stroke: '#f43f5e' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#f43f5e' } },
-  { id: 'e-ca-pa', source: 'classification_agent', target: 'priority_agent', animated: true, style: { stroke: '#f59e0b' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b' } },
+  { id: 'e-ca-rca', source: 'classification_agent', target: 'rca_agent', animated: true, style: { stroke: '#a78bfa' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#a78bfa' } },
+  { id: 'e-rca-pa', source: 'rca_agent', target: 'priority_agent', animated: true, style: { stroke: '#f59e0b' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#f59e0b' } },
   { id: 'e-pa-ctx', source: 'priority_agent', target: 'context_agent', animated: true, style: { stroke: '#8b5cf6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } },
   { id: 'e-ctx-res', source: 'context_agent', target: 'resolution_agent', animated: true, style: { stroke: '#3b82f6' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' } },
   { id: 'e-res-orch', source: 'resolution_agent', target: 'orchestrator_agent', animated: true, style: { stroke: '#ec4899' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#ec4899' } },
@@ -268,6 +277,7 @@ const NODE_META = {
   log_collector: { label: 'Log Collector', icon: '📡', color: '#10b981' },
   preprocessing_engine: { label: 'Preprocessing Engine', icon: '⚙️', color: '#6366f1' },
   classification_agent: { label: 'Classification Agent', icon: '🔍', color: '#f43f5e' },
+  rca_agent: { label: 'RCA Agent', icon: '🎯', color: '#a78bfa' },
   priority_agent: { label: 'Priority Agent', icon: '⚖️', color: '#f59e0b' },
   context_agent: { label: 'Context Agent', icon: '📚', color: '#8b5cf6' },
   resolution_agent: { label: 'Resolution Agent', icon: '💡', color: '#3b82f6' },
@@ -425,16 +435,54 @@ export default function WorkflowView() {
         const nodeOrder2 = ['start', ...PIPELINE_STEPS, 'end'];
         const sourceIdx = nodeOrder2.indexOf(edge.source);
         const targetIdx = nodeOrder2.indexOf(edge.target);
-        const isActive = isPipelineRunning && sourceIdx >= 0 && sourceIdx < currentIdx;
+        const isCompleted = sourceIdx >= 0 && targetIdx >= 0 &&
+          (nodeData[edge.source]?.completedAt || sourceIdx < currentIdx) &&
+          (nodeData[edge.target]?.completedAt || targetIdx <= currentIdx);
         const isCurrent = isPipelineRunning && targetIdx === currentIdx;
+        const isPast = sourceIdx >= 0 && sourceIdx < currentIdx;
+
+        // Determine edge color: green for completed, original for current, dim for pending
+        let strokeColor = edge.style?.stroke || 'var(--border-default)';
+        let strokeWidth = 1.5;
+        let opacity = 0.3;
+        let animated = true;
+
+        if (isPipelineRunning) {
+          if (isCompleted || isPast) {
+            strokeColor = '#10b981'; // Green for completed
+            strokeWidth = 3;
+            opacity = 1;
+            animated = false; // Solid line for completed
+          } else if (isCurrent) {
+            strokeColor = '#10b981'; // Green pulse for current
+            strokeWidth = 3;
+            opacity = 1;
+            animated = true; // Animated for active
+          } else {
+            opacity = 0.2;
+            strokeWidth = 1.5;
+          }
+        } else if (nodeData[edge.source]?.completedAt && nodeData[edge.target]?.completedAt) {
+          // Pipeline finished — all completed edges stay green
+          strokeColor = '#10b981';
+          strokeWidth = 2.5;
+          opacity = 0.9;
+          animated = false;
+        } else {
+          opacity = 0.8;
+        }
 
         return {
           ...edge,
-          animated: true,
+          animated,
           style: {
-            ...edge.style,
-            strokeWidth: isCurrent ? 3 : isActive ? 2.5 : 1.5,
-            opacity: isPipelineRunning ? (isActive || isCurrent ? 1 : 0.3) : 0.8,
+            stroke: strokeColor,
+            strokeWidth,
+            opacity,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: strokeColor,
           },
         };
       })

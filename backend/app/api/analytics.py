@@ -33,7 +33,7 @@ async def incident_trend(days: int = Query(7, ge=1, le=90)):
         # Total incidents per day
         result = await session.execute(
             select(
-                func.date_trunc("day", Incident.created_at).label("day"),
+                func.date(Incident.created_at).label("day"),
                 Incident.priority,
                 func.count(Incident.id).label("count"),
             )
@@ -46,7 +46,7 @@ async def incident_trend(days: int = Query(7, ge=1, le=90)):
     # Build per-day structure
     days_map: dict[str, dict] = {}
     for row in rows:
-        day_str = row.day.strftime("%Y-%m-%d") if row.day else "unknown"
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else (str(row.day)[:10] if row.day else "unknown")
         if day_str not in days_map:
             days_map[day_str] = {"date": day_str, "total": 0, "P1": 0, "P2": 0, "P3": 0}
         priority_key = row.priority.value if hasattr(row.priority, "value") else str(row.priority)
@@ -206,7 +206,7 @@ async def log_volume(days: int = Query(7, ge=1, le=30)):
     async with async_session() as session:
         result = await session.execute(
             select(
-                func.date_trunc("day", CloudLog.created_at).label("day"),
+                func.date(CloudLog.created_at).label("day"),
                 CloudLog.level,
                 func.count(CloudLog.id).label("count"),
             )
@@ -218,7 +218,7 @@ async def log_volume(days: int = Query(7, ge=1, le=30)):
 
     days_map: dict[str, dict] = {}
     for row in rows:
-        day_str = row.day.strftime("%Y-%m-%d") if row.day else "unknown"
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else (str(row.day)[:10] if row.day else "unknown")
         if day_str not in days_map:
             days_map[day_str] = {"date": day_str, "total": 0, "ERROR": 0, "WARNING": 0, "INFO": 0, "CRITICAL": 0}
         level = str(row.level)
@@ -574,7 +574,7 @@ async def service_uptime(days: int = Query(30, ge=7, le=90)):
     async with async_session() as session:
         result = await session.execute(
             select(
-                func.date_trunc("day", Incident.created_at).label("day"),
+                func.date(Incident.created_at).label("day"),
                 Incident.source_service,
                 Incident.priority,
                 func.count(Incident.id).label("count"),
@@ -589,7 +589,7 @@ async def service_uptime(days: int = Query(30, ge=7, le=90)):
     # Build grid
     grid: dict[str, dict[str, dict]] = {}
     for row in rows:
-        day_str = row.day.strftime("%Y-%m-%d") if row.day else "unknown"
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else (str(row.day)[:10] if row.day else "unknown")
         svc = row.source_service
         prio = row.priority.value if hasattr(row.priority, "value") else str(row.priority)
         key = f"{day_str}|{svc}"
@@ -628,7 +628,7 @@ async def kpi_trends(days: int = Query(7, ge=3, le=30)):
         # Incidents per day by priority
         inc_result = await session.execute(
             select(
-                func.date_trunc("day", Incident.created_at).label("day"),
+                func.date(Incident.created_at).label("day"),
                 Incident.priority,
                 Incident.status,
                 func.count(Incident.id).label("count"),
@@ -642,7 +642,7 @@ async def kpi_trends(days: int = Query(7, ge=3, le=30)):
         # Pipeline runs per day
         run_result = await session.execute(
             select(
-                func.date_trunc("day", AgentRun.started_at).label("day"),
+                func.date(AgentRun.started_at).label("day"),
                 func.count(AgentRun.id).label("count"),
             )
             .where(AgentRun.started_at >= cutoff)
@@ -654,7 +654,7 @@ async def kpi_trends(days: int = Query(7, ge=3, le=30)):
     # Build per-day map
     days_map: dict[str, dict] = {}
     for row in inc_rows:
-        day_str = row.day.strftime("%Y-%m-%d") if row.day else "unknown"
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else (str(row.day)[:10] if row.day else "unknown")
         if day_str not in days_map:
             days_map[day_str] = {"date": day_str, "total": 0, "open": 0, "P1": 0, "P2": 0, "P3": 0, "resolved": 0, "pipeline_runs": 0}
         prio = row.priority.value if hasattr(row.priority, "value") else str(row.priority)
@@ -667,7 +667,7 @@ async def kpi_trends(days: int = Query(7, ge=3, le=30)):
             days_map[day_str]["resolved"] += row.count
 
     for row in run_rows:
-        day_str = row.day.strftime("%Y-%m-%d") if row.day else "unknown"
+        day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else (str(row.day)[:10] if row.day else "unknown")
         if day_str not in days_map:
             days_map[day_str] = {"date": day_str, "total": 0, "open": 0, "P1": 0, "P2": 0, "P3": 0, "resolved": 0, "pipeline_runs": 0}
         days_map[day_str]["pipeline_runs"] = row.count
@@ -679,3 +679,226 @@ async def kpi_trends(days: int = Query(7, ge=3, le=30)):
         all_days.append(days_map.get(d, {"date": d, "total": 0, "open": 0, "P1": 0, "P2": 0, "P3": 0, "resolved": 0, "pipeline_runs": 0}))
 
     return {"days": days, "data": all_days}
+
+
+# ============================================================
+# NEW: Root Cause & Recommendation Analytics for Enterprise Dashboard
+# ============================================================
+
+@router.get("/root-cause-distribution")
+async def root_cause_distribution(days: int = Query(30, ge=1, le=90)):
+    """
+    Root cause category distribution — for pie/donut chart.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(
+                Incident.root_cause_category,
+                func.count(Incident.id).label("count"),
+                func.avg(Incident.confidence_score).label("avg_confidence"),
+            )
+            .where(and_(
+                Incident.created_at >= cutoff,
+                Incident.root_cause_category.isnot(None),
+                Incident.root_cause_category != "",
+            ))
+            .group_by(Incident.root_cause_category)
+            .order_by(desc("count"))
+        )
+        rows = result.all()
+
+    return {
+        "days": days,
+        "data": [
+            {
+                "category": row.root_cause_category or "Unknown",
+                "count": row.count,
+                "avg_confidence": round(float(row.avg_confidence or 0), 2),
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/component-breakdown")
+async def component_breakdown(days: int = Query(30, ge=1, le=90)):
+    """
+    Incidents by affected component (UI, Backend, Network, WAF, etc.)
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(
+                Incident.affected_component,
+                Incident.priority,
+                func.count(Incident.id).label("count"),
+            )
+            .where(and_(
+                Incident.created_at >= cutoff,
+                Incident.affected_component.isnot(None),
+                Incident.affected_component != "",
+            ))
+            .group_by(Incident.affected_component, Incident.priority)
+            .order_by(desc("count"))
+        )
+        rows = result.all()
+
+    # Group by component
+    components = {}
+    for row in rows:
+        comp = row.affected_component or "Unknown"
+        if comp not in components:
+            components[comp] = {"component": comp, "total": 0, "P1": 0, "P2": 0, "P3": 0}
+        pri = row.priority.value if row.priority else "P3"
+        components[comp][pri] = row.count
+        components[comp]["total"] += row.count
+
+    return {
+        "days": days,
+        "data": sorted(components.values(), key=lambda x: x["total"], reverse=True),
+    }
+
+
+@router.get("/resolution-metrics")
+async def resolution_metrics(days: int = Query(30, ge=1, le=90)):
+    """
+    Resolution metrics: MTTR, owner team distribution, business impact stats.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async with async_session() as session:
+        # Owner team distribution
+        result = await session.execute(
+            select(
+                Incident.owner_team,
+                func.count(Incident.id).label("count"),
+                func.avg(Incident.estimated_resolution_minutes).label("avg_resolution_min"),
+            )
+            .where(and_(
+                Incident.created_at >= cutoff,
+                Incident.owner_team.isnot(None),
+                Incident.owner_team != "",
+            ))
+            .group_by(Incident.owner_team)
+            .order_by(desc("count"))
+        )
+        team_rows = result.all()
+
+        # Overall stats
+        result2 = await session.execute(
+            select(
+                func.count(Incident.id).label("total"),
+                func.avg(Incident.estimated_resolution_minutes).label("avg_resolution_min"),
+                func.avg(Incident.confidence_score).label("avg_confidence"),
+            )
+            .where(Incident.created_at >= cutoff)
+        )
+        stats = result2.first()
+
+        # Status distribution
+        result3 = await session.execute(
+            select(
+                Incident.status,
+                func.count(Incident.id).label("count"),
+            )
+            .where(Incident.created_at >= cutoff)
+            .group_by(Incident.status)
+        )
+        status_rows = result3.all()
+
+    return {
+        "days": days,
+        "summary": {
+            "total_incidents": stats.total if stats else 0,
+            "avg_resolution_min": round(float(stats.avg_resolution_min or 0), 1) if stats else 0,
+            "avg_confidence": round(float(stats.avg_confidence or 0), 2) if stats else 0,
+        },
+        "by_team": [
+            {
+                "team": row.owner_team or "Unassigned",
+                "count": row.count,
+                "avg_resolution_min": round(float(row.avg_resolution_min or 0), 1),
+            }
+            for row in team_rows
+        ],
+        "by_status": {
+            row.status.value if row.status else "UNKNOWN": row.count
+            for row in status_rows
+        },
+    }
+
+
+@router.get("/incident-groups")
+async def incident_groups_api(days: int = Query(30, ge=1, le=90)):
+    """
+    Incident groups — clustered similar incidents.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    from app.models.incident_group import IncidentGroup
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(IncidentGroup)
+            .where(IncidentGroup.created_at >= cutoff)
+            .order_by(desc(IncidentGroup.total_occurrences))
+            .limit(50)
+        )
+        groups = result.scalars().all()
+
+    return {
+        "days": days,
+        "data": [
+            {
+                "id": g.id,
+                "category_name": g.category_name,
+                "error_type": g.error_type,
+                "source_service": g.source_service,
+                "total_occurrences": g.total_occurrences,
+                "first_seen": g.first_seen.isoformat() if g.first_seen else None,
+                "last_seen": g.last_seen.isoformat() if g.last_seen else None,
+                "description": g.description,
+            }
+            for g in groups
+        ],
+    }
+
+
+@router.get("/rca-details")
+async def rca_details(days: int = Query(30, ge=1, le=90)):
+    """
+    Detailed RCA records with confidence scores and evidence.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    from app.models.root_cause import RootCauseAnalysis
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(RootCauseAnalysis)
+            .where(RootCauseAnalysis.created_at >= cutoff)
+            .order_by(desc(RootCauseAnalysis.confidence_score))
+            .limit(50)
+        )
+        rcas = result.scalars().all()
+
+    return {
+        "days": days,
+        "data": [
+            {
+                "id": r.id,
+                "root_cause": r.root_cause,
+                "root_cause_category": r.root_cause_category,
+                "confidence_score": r.confidence_score,
+                "affected_component": r.affected_component,
+                "supporting_log_count": r.supporting_log_count,
+                "evidence_summary": r.evidence_summary,
+                "analysis_method": r.analysis_method,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rcas
+        ],
+    }

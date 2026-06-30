@@ -1,9 +1,10 @@
 """
-LangGraph Pipeline — 8-agent linear pipeline for Azure Incident Log analysis.
+LangGraph Pipeline — 9-agent linear pipeline for Azure Incident Log analysis.
 
 Flow:
-  Log Collector → Preprocessing Engine → Classification Agent → Priority Agent
-  → Context Agent → Resolution Agent → Orchestrator Agent → Notification Agent
+  Log Collector → Preprocessing Engine → Classification Agent → RCA Agent
+  → Priority Agent → Context Agent → Resolution Agent → Orchestrator Agent
+  → Notification Agent
 """
 
 import time
@@ -26,6 +27,7 @@ from app.agents.priority_agent import priority_agent_node
 from app.agents.context_agent import context_agent_node
 from app.agents.resolution_agent import resolution_agent_node
 from app.agents.orchestrator_agent import orchestrator_agent_node
+from app.agents.rca_agent import rca_agent_node
 from app.agents.notification_agent import notification_agent_node
 from app.database import async_session
 from app.models.agent_run import AgentRun, AgentRunStatus
@@ -59,6 +61,7 @@ PIPELINE_NODES = [
     "log_collector",
     "preprocessing_engine",
     "classification_agent",
+    "rca_agent",
     "priority_agent",
     "context_agent",
     "resolution_agent",
@@ -70,6 +73,7 @@ NODE_LABELS = {
     "log_collector": "Collecting Logs",
     "preprocessing_engine": "Preprocessing",
     "classification_agent": "Classifying Incidents",
+    "rca_agent": "Root Cause Analysis",
     "priority_agent": "Assigning Priority",
     "context_agent": "Looking Up Context",
     "resolution_agent": "Generating Resolutions",
@@ -114,6 +118,9 @@ def _build_output_summary(node_id: str, result: dict) -> dict:
         "classification_agent": lambda r: {
             "description": f"Found {len(r.get('issues_found', []))} issues from {r.get('logs_analyzed', 0)} logs",
         },
+        "rca_agent": lambda r: {
+            "description": f"Analyzed {len(r.get('rca_results', []))} issues for root causes",
+        },
         "priority_agent": lambda r: {
             "description": f"P1={len(r.get('p1_incidents', []))}, P2={len(r.get('p2_incidents', []))}, P3={len(r.get('p3_incidents', []))}",
         },
@@ -139,6 +146,7 @@ def _build_output_summary(node_id: str, result: dict) -> dict:
 async def _node_log_collector(state): return await _wrap_node("log_collector", log_collector_node, state)
 async def _node_preprocessing(state): return await _wrap_node("preprocessing_engine", preprocessing_engine_node, state)
 async def _node_classification(state): return await _wrap_node("classification_agent", classification_agent_node, state)
+async def _node_rca(state): return await _wrap_node("rca_agent", rca_agent_node, state)
 async def _node_priority(state): return await _wrap_node("priority_agent", priority_agent_node, state)
 async def _node_context(state): return await _wrap_node("context_agent", context_agent_node, state)
 async def _node_resolution(state): return await _wrap_node("resolution_agent", resolution_agent_node, state)
@@ -149,13 +157,14 @@ async def _node_notification(state): return await _wrap_node("notification_agent
 # --- Build the graph ---
 
 def build_pipeline() -> StateGraph:
-    """Build the 8-agent linear LangGraph pipeline."""
+    """Build the 9-agent linear LangGraph pipeline."""
     graph = StateGraph(PipelineState)
 
     # Add nodes
     graph.add_node("log_collector", _node_log_collector)
     graph.add_node("preprocessing_engine", _node_preprocessing)
     graph.add_node("classification_agent", _node_classification)
+    graph.add_node("rca_agent", _node_rca)
     graph.add_node("priority_agent", _node_priority)
     graph.add_node("context_agent", _node_context)
     graph.add_node("resolution_agent", _node_resolution)
@@ -166,7 +175,8 @@ def build_pipeline() -> StateGraph:
     graph.set_entry_point("log_collector")
     graph.add_edge("log_collector", "preprocessing_engine")
     graph.add_edge("preprocessing_engine", "classification_agent")
-    graph.add_edge("classification_agent", "priority_agent")
+    graph.add_edge("classification_agent", "rca_agent")
+    graph.add_edge("rca_agent", "priority_agent")
     graph.add_edge("priority_agent", "context_agent")
     graph.add_edge("context_agent", "resolution_agent")
     graph.add_edge("resolution_agent", "orchestrator_agent")
@@ -180,12 +190,14 @@ def build_pipeline() -> StateGraph:
 pipeline = build_pipeline().compile()
 
 
-async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
+async def run_pipeline(trigger_type: str = "manual", start_date: str = None, end_date: str = None) -> dict[str, Any]:
     """
     Execute the full 8-agent pipeline.
 
     Args:
         trigger_type: "manual" or "scheduler"
+        start_date: Optional ISO date string for custom date range
+        end_date: Optional ISO date string for custom date range
 
     Returns:
         Pipeline result summary
@@ -200,6 +212,8 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
     pipeline_start = time.time()
     _node_timings.clear()
     logger.info(f"Pipeline run started: {run_id} (trigger: {trigger_type})")
+    if start_date:
+        logger.info(f"  Date range: {start_date} to {end_date}")
 
     # Create AgentRun record
     try:
@@ -223,6 +237,8 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
         "run_id": run_id,
         "trigger_type": trigger_type,
         "started_at": datetime.utcnow().isoformat(),
+        "start_date": start_date,
+        "end_date": end_date,
         "current_agent": "starting",
         "status": "running",
         "total_collected": 0,
@@ -236,6 +252,7 @@ async def run_pipeline(trigger_type: str = "manual") -> dict[str, Any]:
         "issues_found": [],
         "has_issues": False,
         "logs_analyzed": 0,
+        "rca_results": [],
         "classified_issues": [],
         "p1_incidents": [],
         "p2_incidents": [],

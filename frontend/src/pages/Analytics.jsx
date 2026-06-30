@@ -13,6 +13,8 @@ import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import {
   getIncidentTrend, getServiceBreakdown, getErrorDistribution,
   getNotificationHistory, getTopIssues, getLogVolume, getPipelineRuns,
+  getRootCauseDistribution, getComponentBreakdown, getResolutionMetrics,
+  getIncidentGroups,
 } from '../services/api';
 
 ChartJS.register(
@@ -38,17 +40,26 @@ const CHART_OPTIONS_BASE = {
   maintainAspectRatio: false,
   plugins: {
     legend: {
-      labels: { color: '#94a3b8', font: { size: 12 } },
+      labels: { color: '#334155', font: { size: 12, weight: '600' }, padding: 14, usePointStyle: true },
+    },
+    tooltip: {
+      backgroundColor: '#0f172a',
+      titleColor: '#fff',
+      bodyColor: '#e2e8f0',
+      padding: 12,
+      cornerRadius: 8,
     },
   },
   scales: {
     x: {
-      ticks: { color: '#64748b', maxRotation: 0 },
-      grid: { color: 'rgba(255,255,255,0.05)' },
+      ticks: { color: '#64748b', font: { size: 11 }, maxRotation: 0 },
+      grid: { color: 'rgba(0,0,0,0.04)' },
+      border: { color: '#e2e8f0' },
     },
     y: {
-      ticks: { color: '#64748b' },
-      grid: { color: 'rgba(255,255,255,0.05)' },
+      ticks: { color: '#64748b', font: { size: 11 } },
+      grid: { color: 'rgba(0,0,0,0.04)' },
+      border: { color: '#e2e8f0' },
       beginAtZero: true,
     },
   },
@@ -84,6 +95,12 @@ export default function Analytics() {
   const [trendDays, setTrendDays] = useState(7);
   const [loading, setLoading] = useState(true);
 
+  // RCA & Recommendation data
+  const [rcaDist, setRcaDist] = useState([]);
+  const [compBreakdown, setCompBreakdown] = useState([]);
+  const [resMetrics, setResMetrics] = useState(null);
+  const [incidentGroups, setIncidentGroups] = useState([]);
+
   useEffect(() => {
     loadAll();
   }, [trendDays]);
@@ -91,7 +108,8 @@ export default function Analytics() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [trendRes, svcRes, distRes, notifRes, issueRes, volRes, runsRes] = await Promise.all([
+      const [trendRes, svcRes, distRes, notifRes, issueRes, volRes, runsRes,
+             rcaRes, compRes, resRes, grpRes] = await Promise.all([
         getIncidentTrend(trendDays),
         getServiceBreakdown(),
         getErrorDistribution(),
@@ -99,6 +117,10 @@ export default function Analytics() {
         getTopIssues(8),
         getLogVolume(trendDays),
         getPipelineRuns(15),
+        getRootCauseDistribution(30).catch(() => ({ data: { data: [] } })),
+        getComponentBreakdown(30).catch(() => ({ data: { data: [] } })),
+        getResolutionMetrics(30).catch(() => ({ data: { summary: {}, by_team: [], by_status: {} } })),
+        getIncidentGroups(30).catch(() => ({ data: { data: [] } })),
       ]);
       setTrend(trendRes.data);
       setServices(svcRes.data.services || []);
@@ -107,6 +129,10 @@ export default function Analytics() {
       setTopIssues(issueRes.data.top_issues || []);
       setLogVolume(volRes.data);
       setPipelineRuns(runsRes.data.runs || []);
+      setRcaDist(rcaRes.data?.data || []);
+      setCompBreakdown(compRes.data?.data || []);
+      setResMetrics(resRes.data || null);
+      setIncidentGroups(grpRes.data?.data || []);
     } catch (err) {
       console.error('Analytics load error:', err);
     } finally {
@@ -464,6 +490,177 @@ export default function Analytics() {
           <div className="empty-state"><div className="empty-state-icon">🚀</div><div className="empty-state-title">No runs yet</div></div>
         )}
       </div>
+
+      {/* ============================================================ */}
+      {/* ROOT CAUSE ANALYSIS SECTION */}
+      {/* ============================================================ */}
+      <SectionTitle>🔍 Root Cause Analysis</SectionTitle>
+
+      {/* RCA KPI Cards */}
+      <div className="stats-grid" style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+        <StatCard
+          label="Total Root Causes"
+          value={rcaDist.length}
+          sub="Unique categories identified"
+          color="purple"
+          icon="🎯"
+        />
+        <StatCard
+          label="Avg Confidence"
+          value={resMetrics?.summary?.avg_confidence ? `${(resMetrics.summary.avg_confidence * 100).toFixed(0)}%` : '—'}
+          sub="AI confidence score"
+          color="cyan"
+          icon="🧠"
+        />
+        <StatCard
+          label="Avg Resolution Time"
+          value={resMetrics?.summary?.avg_resolution_min ? `${Math.round(resMetrics.summary.avg_resolution_min)}m` : '—'}
+          sub="Estimated time to resolve"
+          color="green"
+          icon="⏱️"
+        />
+        <StatCard
+          label="Incident Groups"
+          value={incidentGroups.length}
+          sub="Clustered similar incidents"
+          color="orange"
+          icon="📊"
+        />
+      </div>
+
+      {/* RCA Distribution Chart + Component Breakdown */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+        {/* Root Cause Distribution Donut */}
+        <div className="card" style={{ padding: 20 }}>
+          <h3 style={{ color: 'var(--text-primary)', marginBottom: 16, fontSize: 15 }}>Root Cause Distribution</h3>
+          {rcaDist.length > 0 ? (
+            <div style={{ height: 300 }}>
+              <Doughnut
+                data={{
+                  labels: rcaDist.map(d => d.category),
+                  datasets: [{
+                    data: rcaDist.map(d => d.count),
+                    backgroundColor: [
+                      '#6366f1', '#ef4444', '#f59e0b', '#10b981', '#06b6d4',
+                      '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#84cc16',
+                      '#a855f7', '#22d3ee',
+                    ],
+                    borderWidth: 0,
+                    hoverOffset: 8,
+                  }],
+                }}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  cutout: '55%',
+                  plugins: {
+                    legend: {
+                      position: 'right',
+                      labels: { color: '#94a3b8', font: { size: 11 }, padding: 12, usePointStyle: true, pointStyleWidth: 10 },
+                    },
+                    tooltip: {
+                      callbacks: {
+                        afterLabel: (ctx) => {
+                          const item = rcaDist[ctx.dataIndex];
+                          return item ? `Confidence: ${(item.avg_confidence * 100).toFixed(0)}%` : '';
+                        }
+                      }
+                    }
+                  },
+                }}
+              />
+            </div>
+          ) : (
+            <div className="empty-state"><div className="empty-state-icon">🔍</div><div className="empty-state-title">No RCA data yet</div><div className="empty-state-description">Run the pipeline to generate root cause analyses</div></div>
+          )}
+        </div>
+
+        {/* Component Breakdown */}
+        <div className="card" style={{ padding: 20 }}>
+          <h3 style={{ color: 'var(--text-primary)', marginBottom: 16, fontSize: 15 }}>Incidents by Component</h3>
+          {compBreakdown.length > 0 ? (
+            <div style={{ height: 300 }}>
+              <Bar
+                data={{
+                  labels: compBreakdown.map(d => d.component?.replace('Backend — ', '').replace('UI / ', '') || 'Unknown'),
+                  datasets: [
+                    { label: 'P1 (Critical)', data: compBreakdown.map(d => d.P1 || 0), backgroundColor: '#ef4444' },
+                    { label: 'P2 (High)', data: compBreakdown.map(d => d.P2 || 0), backgroundColor: '#f59e0b' },
+                    { label: 'P3 (Medium)', data: compBreakdown.map(d => d.P3 || 0), backgroundColor: '#10b981' },
+                  ],
+                }}
+                options={{
+                  ...CHART_OPTIONS_BASE,
+                  plugins: { ...CHART_OPTIONS_BASE.plugins, legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+                  scales: { ...CHART_OPTIONS_BASE.scales, x: { ...CHART_OPTIONS_BASE.scales.x, stacked: true }, y: { ...CHART_OPTIONS_BASE.scales.y, stacked: true } },
+                }}
+              />
+            </div>
+          ) : (
+            <div className="empty-state"><div className="empty-state-icon">📊</div><div className="empty-state-title">No component data yet</div></div>
+          )}
+        </div>
+      </div>
+
+      {/* Owner Team & Resolution Metrics */}
+      {resMetrics?.by_team?.length > 0 && (
+        <div className="card" style={{ padding: 20, marginBottom: 24 }}>
+          <h3 style={{ color: 'var(--text-primary)', marginBottom: 16, fontSize: 15 }}>🏢 Owner Team Distribution</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+            {resMetrics.by_team.map((team, i) => (
+              <div key={i} style={{
+                background: 'var(--bg-primary)',
+                borderRadius: 10,
+                padding: '14px 18px',
+                border: '1px solid var(--border-primary)',
+              }}>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>{team.team}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)' }}>{team.count}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Avg resolve: {team.avg_resolution_min}m</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Incident Groups Table */}
+      {incidentGroups.length > 0 && (
+        <div className="card" style={{ padding: 20, marginBottom: 24 }}>
+          <h3 style={{ color: 'var(--text-primary)', marginBottom: 16, fontSize: 15 }}>🗂️ Incident Groups (Clustered)</h3>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Error Type</th>
+                  <th>Service</th>
+                  <th>Occurrences</th>
+                  <th>First Seen</th>
+                  <th>Last Seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {incidentGroups.map((g, i) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 600 }}>{g.category_name}</td>
+                    <td>{g.error_type || '—'}</td>
+                    <td>{g.source_service || '—'}</td>
+                    <td style={{ fontWeight: 600, color: g.total_occurrences > 100 ? '#ef4444' : g.total_occurrences > 10 ? '#f59e0b' : '#10b981' }}>
+                      {g.total_occurrences}
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                      {g.first_seen ? new Date(g.first_seen).toLocaleDateString() : '—'}
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                      {g.last_seen ? new Date(g.last_seen).toLocaleDateString() : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

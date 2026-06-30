@@ -34,8 +34,15 @@ async def log_collector_node(state: PipelineState) -> dict[str, Any]:
     try:
         from app.services.azure_log_service import azure_log_service
 
-        hours_back = settings.scheduler_interval_hours
-        all_logs = await azure_log_service.collect_all(hours_back=hours_back)
+        start_date = state.get("start_date")
+        end_date = state.get("end_date")
+
+        if start_date and end_date:
+            logger.info(f"Agent 1 [Log Collector]: Using custom date range: {start_date} to {end_date}")
+            all_logs = await azure_log_service.collect_all(start_date=start_date, end_date=end_date)
+        else:
+            hours_back = settings.scheduler_interval_hours
+            all_logs = await azure_log_service.collect_all(hours_back=hours_back)
 
         if not any(all_logs.values()):
             logger.info("Agent 1 [Log Collector]: No logs collected from any source")

@@ -39,33 +39,33 @@ class Settings(BaseSettings):
     azure_frontdoor_resource_id: str = ""
     azure_appgateway_resource_id: str = ""
     azure_apim_resource_id: str = ""
-    azure_appservice_url: str = ""
-    azure_apim_gateway_url: str = ""
-    azure_appgw_public_ip: str = ""
-    azure_appgw_dns: str = ""
     azure_vm_resource_id: str = ""
     azure_log_analytics_workspace_id: str = ""
-    # Deployed resource endpoints (informational)
+
+    # --- Azure Service Endpoints (for health checks) ---
     azure_appservice_url: str = ""
     azure_apim_gateway_url: str = ""
     azure_appgw_public_ip: str = ""
     azure_appgw_dns: str = ""
+    azure_blob_storage_url: str = ""
 
     # --- GCP / Vertex AI ---
     google_application_credentials: str = "../service-account-key.json"
     gcp_project_id: str = ""
     gcp_location: str = "us-central1"
     gemini_model: str = "gemini-2.5-flash"
+    gemini_api_key: str = ""
 
     # --- Scheduler ---
-    scheduler_interval_hours: int = 6
+    scheduler_interval_hours: int = 2
     scheduler_enabled: bool = True
 
     # --- Pipeline Control ---
     pipeline_enabled: bool = True
 
     # --- Notification ---
-    notification_channel: str = "smtp"  # "smtp" or "azure_communication_service"
+    notification_channel: str = "graph_api"  # "smtp", "azure_communication_service", or "graph_api"
+    graph_sender_email: str = ""  # UPN or email of the sender mailbox for Graph API
     azure_communication_connection_string: str = ""
     azure_communication_sender: str = ""
 

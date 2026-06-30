@@ -52,7 +52,7 @@ export default function IncidentPanel() {
   const formatDate = (d) => d && d !== 'None' ? new Date(d).toLocaleString() : 'N/A';
 
   const handleExport = (format) => {
-    window.open(`http://localhost:8000/api/export/incidents?format=${format}`, '_blank');
+    window.open(`http://localhost:8001/api/export/incidents?format=${format}`, '_blank');
   };
 
   const priorityBadge = (p) => {
@@ -161,6 +161,77 @@ export default function IncidentPanel() {
                       <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{inc.ai_analysis}</p>
                     </div>
                   )}
+
+                  {/* Root Cause Analysis Panel */}
+                  {inc.root_cause && (
+                    <div style={{
+                      marginBottom: 16,
+                      padding: 14,
+                      background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.05))',
+                      borderRadius: 10,
+                      border: '1px solid rgba(99,102,241,0.2)',
+                    }}>
+                      <h4 style={{ fontSize: 13, color: '#a78bfa', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        🎯 Root Cause Analysis
+                        {inc.confidence_score && (
+                          <span style={{
+                            fontSize: 11,
+                            background: inc.confidence_score > 0.8 ? 'rgba(16,185,129,0.15)' : inc.confidence_score > 0.6 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                            color: inc.confidence_score > 0.8 ? '#10b981' : inc.confidence_score > 0.6 ? '#f59e0b' : '#ef4444',
+                            padding: '2px 8px',
+                            borderRadius: 12,
+                            fontWeight: 600,
+                          }}>
+                            {(inc.confidence_score * 100).toFixed(0)}% confidence
+                          </span>
+                        )}
+                      </h4>
+                      <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 8 }}>{inc.root_cause}</p>
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-tertiary)' }}>
+                        {inc.root_cause_category && <span>📂 <strong>{inc.root_cause_category}</strong></span>}
+                        {inc.affected_component && <span>🔧 <strong>{inc.affected_component}</strong></span>}
+                        {inc.owner_team && <span>👥 <strong>{inc.owner_team}</strong></span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Structured Recommendation Panel */}
+                  {(inc.immediate_resolution || inc.preventive_action) && (
+                    <div style={{
+                      marginBottom: 16,
+                      padding: 14,
+                      background: 'linear-gradient(135deg, rgba(16,185,129,0.08), rgba(6,182,212,0.05))',
+                      borderRadius: 10,
+                      border: '1px solid rgba(16,185,129,0.2)',
+                    }}>
+                      <h4 style={{ fontSize: 13, color: '#34d399', marginBottom: 10 }}>💡 Recommendations</h4>
+                      {inc.immediate_resolution && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 600, marginBottom: 4 }}>⚡ Immediate Resolution</div>
+                          <pre style={{
+                            fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)',
+                            whiteSpace: 'pre-wrap', lineHeight: 1.6, background: 'var(--bg-tertiary)',
+                            padding: 10, borderRadius: 8, margin: 0,
+                          }}>{inc.immediate_resolution}</pre>
+                        </div>
+                      )}
+                      {inc.preventive_action && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 11, color: '#06b6d4', fontWeight: 600, marginBottom: 4 }}>🛡️ Preventive Action</div>
+                          <pre style={{
+                            fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)',
+                            whiteSpace: 'pre-wrap', lineHeight: 1.6, background: 'var(--bg-tertiary)',
+                            padding: 10, borderRadius: 8, margin: 0,
+                          }}>{inc.preventive_action}</pre>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6 }}>
+                        {inc.business_impact && <span>📈 {inc.business_impact}</span>}
+                        {inc.estimated_resolution_minutes && <span>⏱️ Est. {inc.estimated_resolution_minutes}m</span>}
+                      </div>
+                    </div>
+                  )}
+
                   {inc.ai_solution && (
                     <div style={{ marginBottom: 16 }}>
                       <h4 style={{ fontSize: 13, color: 'var(--accent-emerald)', marginBottom: 8 }}>💡 Recommended Resolution</h4>

@@ -23,6 +23,7 @@ from app.api.node_config import router as node_config_router
 from app.api.pipeline import router as pipeline_router
 from app.api.ingest import router as ingest_router
 from app.api.analytics import router as analytics_router
+from app.api.health_check import router as health_check_router
 from app.services.scheduler_service import start_scheduler, stop_scheduler
 from app.agents.graph import set_broadcast_callback
 
@@ -60,11 +61,24 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Ensure CORS headers are present even on unhandled 500 errors
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error on {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
 
 # Auth router — public (no auth required)
 app.include_router(auth_router)
@@ -80,11 +94,12 @@ app.include_router(node_config_router)
 app.include_router(pipeline_router)
 app.include_router(ingest_router)
 app.include_router(analytics_router)
+app.include_router(health_check_router)
 app.include_router(node_config_router, dependencies=[Depends(get_current_user)])
 app.include_router(pipeline_router, dependencies=[Depends(get_current_user)])
 
 
-@app.get("/", tags=["Health"])
+@app.get("/api/health/status", tags=["Health"])
 async def root():
     """Health check endpoint."""
     return {
@@ -201,3 +216,39 @@ async def dashboard_summary():
         },
     }
 
+
+# ─── Serve Frontend Static Build (Production) ───
+import os
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
+
+FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+if FRONTEND_DIST.exists():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="static-assets")
+
+    # Serve other static files (favicon, etc.)
+    @app.get("/vite.svg")
+    @app.get("/image.png")
+    async def serve_static_file(request: Request):
+        file_path = FRONTEND_DIST / request.url.path.lstrip("/")
+        if file_path.exists():
+            return FileResponse(str(file_path))
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+
+    # Catch-all: serve index.html for client-side routing (must be LAST)
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Don't catch API routes
+        if full_path.startswith("api/") or full_path.startswith("ws/"):
+            return JSONResponse({"detail": "Not found"}, status_code=404)
+        index_file = FRONTEND_DIST / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        return JSONResponse({"detail": "Frontend not built"}, status_code=404)
+
+    logger.info(f"Serving frontend from {FRONTEND_DIST}")
+else:
+    logger.warning(f"Frontend dist not found at {FRONTEND_DIST} — API-only mode")

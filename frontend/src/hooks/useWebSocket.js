@@ -21,7 +21,8 @@ export default function useWebSocket() {
 
   const connect = useCallback(() => {
     try {
-      const ws = new WebSocket('ws://localhost:8000/ws/pipeline');
+      const wsPort = window.location.hostname === 'localhost' ? '8001' : '80';
+      const ws = new WebSocket(`ws://${window.location.hostname}:${wsPort}/ws/pipeline`);
 
       ws.onopen = () => {
         setWsConnected(true);

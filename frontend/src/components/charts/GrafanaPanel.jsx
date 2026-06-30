@@ -1,38 +1,21 @@
 /**
- * GrafanaPanel — Reusable wrapper that provides Grafana-style panel chrome.
- * Dark header bar with title, optional subtitle, time-range selector,
- * loading skeleton, and hover glow.
+ * GrafanaPanel — Reusable card wrapper for dashboard charts.
+ * White theme with clean borders and shadows.
  */
+export default function GrafanaPanel({ title, subtitle, children, loading, timeRange, onTimeRangeChange }) {
+  const ranges = ['1d', '7d', '14d', '30d'];
 
-import { useState } from 'react';
-
-const TIME_RANGES = ['7d', '14d', '30d'];
-
-export default function GrafanaPanel({
-  title,
-  subtitle,
-  children,
-  timeRange,
-  onTimeRangeChange,
-  loading = false,
-  className = '',
-  fullWidth = false,
-}) {
   return (
-    <div className={`grafana-panel ${fullWidth ? 'grafana-panel-full' : ''} ${className}`}>
+    <div className="grafana-panel">
       <div className="grafana-panel-header">
-        <div className="grafana-panel-title-group">
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <span className="grafana-panel-title">{title}</span>
           {subtitle && <span className="grafana-panel-subtitle">{subtitle}</span>}
         </div>
         {onTimeRangeChange && (
-          <div className="time-range-pills">
-            {TIME_RANGES.map((r) => (
-              <button
-                key={r}
-                className={`time-range-pill ${timeRange === r ? 'active' : ''}`}
-                onClick={() => onTimeRangeChange(r)}
-              >
+          <div className="panel-time-range">
+            {ranges.map((r) => (
+              <button key={r} className={timeRange === r ? 'active' : ''} onClick={() => onTimeRangeChange(r)}>
                 {r}
               </button>
             ))}
@@ -41,11 +24,8 @@ export default function GrafanaPanel({
       </div>
       <div className="grafana-panel-body">
         {loading ? (
-          <div className="grafana-panel-skeleton">
-            <div className="skeleton-bar" style={{ width: '80%' }} />
-            <div className="skeleton-bar" style={{ width: '60%' }} />
-            <div className="skeleton-bar" style={{ width: '70%' }} />
-            <div className="skeleton-bar" style={{ width: '50%' }} />
+          <div className="grafana-panel-loading">
+            <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block', fontSize: 20 }}>⟳</span>
           </div>
         ) : (
           children
